@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.1
+
+- `./install.sh --run` installs then starts hub + relay
+- `./run.sh` / `run.cmd` / `run.ps1` — hub + ChatGPT relay (CDP attach to Chrome `:9222` when available)
+- Default site is `chatgpt`; auto-prints Claude paste prompt
+
 ## 1.5.0
 
 - `./install.sh` / `install.cmd` / `install.ps1` **auto-install Playwright browsers** (no manual npm/npx step)

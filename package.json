@@ -1,7 +1,7 @@
 {
   "name": "mailnotmilk",
-  "version": "1.5.0",
-  "description": "Bridge browser AIs with Claude Code/Cursor/OpenCode — auto-installs Playwright on Linux, macOS, Windows native, and WSL.",
+  "version": "1.5.1",
+  "description": "Bridge browser AIs with Claude Code/Cursor/OpenCode — ./install.sh --run and ./run.sh start hub+relay.",
   "keywords": [
     "mcp",
     "mailbox",
@@ -39,6 +39,9 @@
     "install.sh",
     "install.cmd",
     "install.ps1",
+    "run.sh",
+    "run.cmd",
+    "run.ps1",
     "README.md",
     "LICENSE",
     "CHANGELOG.md",

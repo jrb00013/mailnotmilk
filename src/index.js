@@ -15,6 +15,7 @@ export {
   ensureRelayRuntime,
   ensurePlaywrightBrowsers,
 } from "./playwright-setup.js";
+export { runStack, cdpAvailable } from "./run-stack.js";
 export { formatInboxLines } from "./format.js";
 export { renderBoard } from "./board.js";
 export { watchInbox } from "./watch.js";

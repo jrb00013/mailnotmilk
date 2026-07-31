@@ -8,17 +8,21 @@ Bridge **any browser AI** (ChatGPT, DeepSeek web, Gemini, Copilot, Claude.ai) wi
 
 **Linux / macOS / WSL**
 ```bash
-./install.sh
-# or
-./install.sh install --tools all --skills --global-skills
+./install.sh              # install MCP + skills + browsers
+./install.sh --run        # install, then start hub + ChatGPT relay
+./run.sh                  # hub + relay only (attach Chrome :9222 if available)
+./run.sh --site chatgpt --peer claude
 ```
 
 **Windows native**
 ```bat
 install.cmd
+install.cmd --run
+run.cmd
 ```
 ```powershell
-.\install.ps1
+.\install.ps1 --run
+.\run.ps1 --site chatgpt
 ```
 
 Install **automatically**:

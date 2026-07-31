@@ -236,6 +236,33 @@ program
   });
 
 program
+  .command("run")
+  .description("Start hub + browser relay (CDP attach if Chrome on :9222)")
+  .option("--site <site>", "chatgpt|deepseek|claude|gemini|copilot", "chatgpt")
+  .option("--browser <b>", "chrome|firefox", "chrome")
+  .option("--peer <id>", "Coding agent id", "claude")
+  .option("--wait <ms>", "Wait for peer reply each tick", "20000")
+  .option("--interval <ms>", "Loop interval", "8000")
+  .option("--once", "Single tick then exit (default is loop)")
+  .option("--headless", "Launch headed=false browser if not using CDP")
+  .option("--cdp <url>", "Chrome CDP URL", "http://127.0.0.1:9222")
+  .option("--no-open", "Do not open hub in a browser tab")
+  .action(async (opts) => {
+    const { runStack } = await import("../src/run-stack.js");
+    await runStack({
+      site: opts.site,
+      browser: opts.browser,
+      peer: opts.peer,
+      waitMs: Number(opts.wait),
+      intervalMs: Number(opts.interval),
+      loop: !opts.once,
+      headless: Boolean(opts.headless),
+      cdpUrl: opts.cdp,
+      openBrowser: opts.open !== false,
+    });
+  });
+
+program
   .command("bridge")
   .description(
     "DeepSeek (Cursor) ↔ Claude Code: create chat and print paste block for Claude"
@@ -276,7 +303,7 @@ program
 program
   .command("relay")
   .description("Relay browser AI chat (Chrome/Firefox) ↔ coding agent via mailnotmilk")
-  .option("--site <site>", "chatgpt|deepseek|claude|gemini|copilot", "deepseek")
+  .option("--site <site>", "chatgpt|deepseek|claude|gemini|copilot", "chatgpt")
   .option("--browser <b>", "chrome|firefox", "chrome")
   .option("--peer <id>", "Coding agent id", "claude")
   .option("--chat <id>", "Existing chat id")
@@ -284,12 +311,19 @@ program
   .option("--headless", "Launch browser headless")
   .option("--loop", "Keep ticking")
   .option("--interval <ms>", "Loop interval", "8000")
+  .option("--cdp-url <url>", "If set (or :9222 up), attach Chrome via CDP")
   .action(async (opts) => {
     const browser = await import("../src/browser.js");
     const { relayTick } = await import("../src/relay.js");
+    const { cdpAvailable } = await import("../src/run-stack.js");
+    const cdpUrl = opts.cdpUrl || "http://127.0.0.1:9222";
+    const useCdp =
+      opts.browser !== "firefox" &&
+      (Boolean(opts.cdpUrl) || (await cdpAvailable(cdpUrl)));
     await browser.browserConnect({
       browser: opts.browser === "firefox" ? "firefox" : "chrome",
-      mode: "launch",
+      mode: useCdp ? "cdp" : "launch",
+      cdpUrl,
       headless: Boolean(opts.headless),
     });
     await browser.browserOpenAi({ site: opts.site });
