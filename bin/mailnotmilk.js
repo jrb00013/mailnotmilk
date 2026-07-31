@@ -25,10 +25,8 @@ program
   .command("install")
   .description("Auto-configure AI tools to use this MCP server")
   .option("--all", "Install for all supported tools")
-  .option(
-    "--tool <tool>",
-    "Install for a specific tool (claude-code, cursor, windsurf, …)"
-  )
+  .option("--tool <tool>", "Install for a specific tool")
+  .option("--hooks", "Also install turn-hook helpers")
   .action(async (opts) => {
     const { install, AVAILABLE_TOOLS } = await import("../src/install.js");
     if (!opts.all && !opts.tool) {
@@ -37,6 +35,11 @@ program
       process.exit(1);
     }
     await install(opts.all ? "all" : opts.tool);
+    if (opts.hooks) {
+      const turn = await import("../src/turn.js");
+      console.log(turn.installCursorHooks(process.cwd()));
+      console.log(turn.installClaudeStopHint());
+    }
   });
 
 program
@@ -49,11 +52,12 @@ program
 
 program
   .command("send")
-  .description("CLI: post a message into the mailbox")
+  .description("Post a message")
   .requiredOption("-t, --text <text>", "Message body")
-  .option("-f, --from <id>", "Sender id (default: auto-detect)")
+  .option("-f, --from <id>", "Sender id")
   .option("--to <id>", "Recipient agent id")
   .option("-r, --room <room>", "Room", "general")
+  .option("-p, --priority <p>", "low|normal|high|urgent", "normal")
   .action(async (opts) => {
     const { detectProvider } = await import("../src/identity.js");
     const store = await import("../src/store.js");
@@ -62,30 +66,183 @@ program
       to: opts.to || null,
       room: opts.room,
       text: opts.text,
+      priority: opts.priority,
     });
     console.log(JSON.stringify(msg, null, 2));
   });
 
 program
-  .command("inbox")
-  .description("CLI: list unread messages")
-  .option("-a, --agent <id>", "Agent id (default: auto-detect)")
-  .option("-n, --limit <n>", "Max results", "20")
-  .option("--read", "Mark returned messages as read")
+  .command("handoff")
+  .description("Post a structured handoff")
+  .requiredOption("--to <id>", "Target agent")
+  .requiredOption("--title <title>", "Handoff title")
+  .requiredOption("--objective <text>", "What to do")
+  .option("--context <text>", "Extra context")
+  .option("--file <path>", "Related file (repeatable)", (v, a) => [...a, v], [])
+  .option("--accept <item>", "Acceptance criterion (repeatable)", (v, a) => [...a, v], [])
+  .option("-r, --room <room>", "Room", "general")
+  .option("-f, --from <id>", "Sender")
   .action(async (opts) => {
     const { detectProvider } = await import("../src/identity.js");
     const store = await import("../src/store.js");
+    const msg = store.postHandoff({
+      from: opts.from || detectProvider(),
+      to: opts.to,
+      title: opts.title,
+      objective: opts.objective,
+      context: opts.context || "",
+      files: opts.file || [],
+      acceptance: opts.accept || [],
+      room: opts.room,
+    });
+    console.log(JSON.stringify(msg, null, 2));
+  });
+
+program
+  .command("turn")
+  .description("Post an end-of-turn summary")
+  .requiredOption("-t, --text <summary>", "What you did")
+  .option("--to <id>", "Notify agent")
+  .option("-r, --room <room>", "Room", "general")
+  .option("--outcome <o>", "progress|blocked|done", "progress")
+  .option("-f, --from <id>", "Sender")
+  .action(async (opts) => {
+    const { detectProvider } = await import("../src/identity.js");
+    const { postTurn, appendLocalLog } = await import("../src/turn.js");
+    const msg = postTurn({
+      from: opts.from || detectProvider(),
+      to: opts.to || null,
+      room: opts.room,
+      summary: opts.text,
+      outcome: opts.outcome,
+    });
+    appendLocalLog(`${msg.from}: ${opts.text}`);
+    console.log(JSON.stringify(msg, null, 2));
+  });
+
+program
+  .command("inbox")
+  .description("List unread messages")
+  .option("-a, --agent <id>", "Agent id")
+  .option("-n, --limit <n>", "Max results", "20")
+  .option("-r, --room <room>", "Room filter")
+  .option("--read", "Mark returned messages as read")
+  .option("--pretty", "Human lines instead of JSON")
+  .action(async (opts) => {
+    const { detectProvider } = await import("../src/identity.js");
+    const store = await import("../src/store.js");
+    const { formatInboxLines } = await import("../src/format.js");
     const id = opts.agent || detectProvider();
-    const messages = store.checkInbox(id, { limit: Number(opts.limit) });
-    if (opts.read) {
-      for (const m of messages) store.readMessage(id, m.id);
+    const messages = store.checkInbox(id, {
+      limit: Number(opts.limit),
+      room: opts.room || null,
+    });
+    if (opts.read) for (const m of messages) store.readMessage(id, m.id);
+    if (opts.pretty) {
+      console.log(formatInboxLines(messages).join("\n") || "(empty)");
+    } else {
+      console.log(JSON.stringify({ agent_id: id, messages }, null, 2));
     }
-    console.log(JSON.stringify({ agent_id: id, messages }, null, 2));
+  });
+
+program
+  .command("thread")
+  .description("Show a message thread")
+  .argument("<id>", "Message id")
+  .action(async (id) => {
+    const store = await import("../src/store.js");
+    console.log(JSON.stringify(store.getThread(Number(id)), null, 2));
+  });
+
+program
+  .command("search")
+  .description("Search message bodies")
+  .argument("<query>", "Search string")
+  .option("-n, --limit <n>", "Max", "50")
+  .action(async (query, opts) => {
+    const store = await import("../src/store.js");
+    console.log(
+      JSON.stringify(
+        store.searchMessages({ query, limit: Number(opts.limit) }),
+        null,
+        2
+      )
+    );
+  });
+
+program
+  .command("history")
+  .description("Recent messages")
+  .option("-a, --agent <id>")
+  .option("-r, --room <room>")
+  .option("-n, --limit <n>", "50")
+  .action(async (opts) => {
+    const store = await import("../src/store.js");
+    console.log(
+      JSON.stringify(
+        store.listHistory({
+          agentId: opts.agent || null,
+          room: opts.room || null,
+          limit: Number(opts.limit),
+        }),
+        null,
+        2
+      )
+    );
+  });
+
+program
+  .command("watch")
+  .description("Poll inbox and print new mail")
+  .option("-a, --agent <id>")
+  .option("-r, --room <room>")
+  .option("-i, --interval <ms>", "1500")
+  .option("--ack", "Auto-ack printed messages")
+  .action(async (opts) => {
+    const { detectProvider } = await import("../src/identity.js");
+    const { watchInbox } = await import("../src/watch.js");
+    const ac = new AbortController();
+    process.on("SIGINT", () => ac.abort());
+    console.error(
+      `watching as ${opts.agent || detectProvider()} (ctrl-c to stop)`
+    );
+    watchInbox({
+      agentId: opts.agent || detectProvider(),
+      room: opts.room || null,
+      intervalMs: Number(opts.interval),
+      ack: Boolean(opts.ack),
+      signal: ac.signal,
+    });
+    await new Promise(() => {});
+  });
+
+program
+  .command("board")
+  .description("Print status board")
+  .action(async () => {
+    const { renderBoard } = await import("../src/board.js");
+    console.log(renderBoard());
+  });
+
+program
+  .command("stats")
+  .description("Mailbox stats JSON")
+  .action(async () => {
+    const store = await import("../src/store.js");
+    console.log(JSON.stringify(store.stats(), null, 2));
+  });
+
+program
+  .command("rooms")
+  .description("List rooms")
+  .action(async () => {
+    const store = await import("../src/store.js");
+    console.log(JSON.stringify(store.listRooms(), null, 2));
   });
 
 program
   .command("agents")
-  .description("CLI: list recent agents")
+  .description("List recent agents")
   .action(async () => {
     const store = await import("../src/store.js");
     console.log(JSON.stringify(store.listAgents(), null, 2));
@@ -93,18 +250,51 @@ program
 
 program
   .command("status")
-  .description("CLI: get or set agent status")
+  .description("Get or set agent status")
   .argument("[agent]", "Agent id")
   .option("-s, --set <status>", "idle | working | waiting")
   .action(async (agent, opts) => {
     const { detectProvider } = await import("../src/identity.js");
     const store = await import("../src/store.js");
     const id = agent || detectProvider();
-    if (opts.set) {
-      console.log(JSON.stringify(store.setStatus(id, opts.set), null, 2));
-    } else {
-      console.log(JSON.stringify(store.getStatus(id), null, 2));
-    }
+    if (opts.set) console.log(JSON.stringify(store.setStatus(id, opts.set), null, 2));
+    else console.log(JSON.stringify(store.getStatus(id), null, 2));
+  });
+
+program
+  .command("react")
+  .description("React to a message")
+  .argument("<id>", "Message id")
+  .argument("<emoji>", "Emoji")
+  .option("-a, --agent <id>")
+  .action(async (id, emoji, opts) => {
+    const { detectProvider } = await import("../src/identity.js");
+    const store = await import("../src/store.js");
+    console.log(
+      JSON.stringify(
+        store.react(Number(id), opts.agent || detectProvider(), emoji),
+        null,
+        2
+      )
+    );
+  });
+
+program
+  .command("archive")
+  .description("Archive a message")
+  .argument("<id>", "Message id")
+  .action(async (id) => {
+    const store = await import("../src/store.js");
+    console.log(JSON.stringify(store.archiveMessage(Number(id)), null, 2));
+  });
+
+program
+  .command("hooks")
+  .description("Install local turn-hook helpers")
+  .action(async () => {
+    const turn = await import("../src/turn.js");
+    console.log(JSON.stringify(turn.installCursorHooks(process.cwd()), null, 2));
+    console.log(JSON.stringify(turn.installClaudeStopHint(), null, 2));
   });
 
 program.parse();
