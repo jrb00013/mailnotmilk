@@ -1,0 +1,7 @@
+tests/
+examples/
+scripts/
+coverage/
+*.db
+*.db-*
+.git/
