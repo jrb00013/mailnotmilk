@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.6.3
+
+- **Fix: streamed replies were forwarded mid-generation and silently truncated.** The relay posted the first extraction whose text differed from the previous turn — true the moment streaming starts. A 6.6k-char reply was arriving as 703 chars, cut mid-sentence, with nothing to indicate it was incomplete. Completion is now a state machine (`createTurnSettler`) requiring both text quiescence *and* the page reporting not-generating; quiescence alone fires on any pause between tokens.
+- Unknown generating state (extension mode has no stop button to read) is carried as its own value rather than collapsed into "not generating" — it demands a doubled quiet window instead. Treating unknown as negative would have reintroduced the bug in the one mode that cannot detect it.
+- A capture that never settles is still forwarded, but annotated `_(relay: capture did not settle …)_`. Silent truncation was the worst property of the original bug.
+- **Fix: a truncated post used to permanently suppress its own completed version.** Dedup matched on prefix overlap, and a partial shares a prefix with the finished answer. A strictly longer continuation of an existing post now counts as new.
+- Assistant turns are no longer forwarded while a reply is actively streaming.
+- **Site matching no longer hardcodes URLs.** Hostnames derive from each site's own `url` plus optional `aliases`; the duplicate `match` map, a second copy in `urlIncludesForSite`, and an inline tab-picker regex are gone. Subdomains match (`eu.chatgpt.com`), suffix lookalikes do not (`chatgpt.com.evil.test`).
+- Any URL now works without a site entry: a `GENERIC` profile supplies message/composer/send/stop selectors, so unrecognised sites keep completion detection instead of silently losing it.
+- User-defined sites via `~/.mailnotmilk/sites.json` — new chat UIs need no code change.
+- 25 tests covering streaming completion, dedup, and URL matching (`tests/browser-sites.test.js`, `tests/relay-dedup.test.js`).
+
 ## 1.6.2
 
 - `./run.sh` and `./install.sh --run` always (re)install the Chrome extension and launch Chrome with `--load-extension` if the extension has not said hello yet
