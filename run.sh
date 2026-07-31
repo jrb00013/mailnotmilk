@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Hub API + browser relay via Chrome extension (normal shortcut, any site).
-# One-time: mailnotmilk extension → Load unpacked
+# Hub API + browser relay. Always (re)installs the Chrome extension, then runs.
 # Usage:
 #   ./run.sh
 #   ./run.sh --site deepseek --peer claude
@@ -25,5 +24,8 @@ if [[ ! -d "$ROOT/node_modules/playwright" ]]; then
   (cd "$ROOT" && "$NODE" "$CLI" install --browsers-only --skip-deps) || true
 fi
 
-echo "Extension folder (Load unpacked once if needed): $ROOT/extension" >&2
+# Ensure extension registration before run (also done inside `mailnotmilk run`)
+echo "→ ensuring Chrome extension…" >&2
+"$NODE" "$CLI" extension >/dev/null || true
+
 exec "$NODE" "$CLI" run "$@"

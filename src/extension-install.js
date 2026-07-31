@@ -21,7 +21,7 @@ import {
 } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir, platform } from "node:os";
-import { execFileSync, execSync, spawnSync } from "node:child_process";
+import { spawn, execFileSync, execSync, spawnSync } from "node:child_process";
 import { createHash, generateKeyPairSync, createPrivateKey, createPublicKey } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dataDir, ensureDataDir } from "./paths.js";
@@ -396,6 +396,34 @@ export function installChromeExtension() {
     results,
     restartChrome: true,
   };
+}
+
+/**
+ * Start Chrome with the extension loaded (works even if External Extensions
+ * hasn't taken effect yet). Safe if Chrome is already running — may open a
+ * new window in the existing process (extension may need a full Chrome restart
+ * in that case).
+ */
+export function launchChromeWithExtension(extDir, { url = null, chromeBin = null } = {}) {
+  const bin = chromeBin || findChromeBin();
+  if (!bin) throw new Error("Chrome/Chromium binary not found");
+  if (!extDir || !existsSync(extDir)) throw new Error(`extension dir missing: ${extDir}`);
+
+  const args = [
+    `--load-extension=${extDir}`,
+    "--no-first-run",
+    "--no-default-browser-check",
+  ];
+  if (url) args.push(url);
+
+  console.error(`browser: launching ${bin} with --load-extension=${extDir}`);
+  const child = spawn(bin, args, {
+    detached: true,
+    stdio: "ignore",
+    env: process.env,
+  });
+  child.unref();
+  return { ok: true, bin, extDir, pid: child.pid };
 }
 
 export function extensionInstallHint(info) {

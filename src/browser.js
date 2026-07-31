@@ -4,7 +4,7 @@
  * Fallback: CDP / Playwright.
  */
 
-import { mkdirSync } from "node:fs";
+import { mkdirSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { dataDir, ensureDataDir } from "./paths.js";
 import * as ext from "./ext-bridge.js";
@@ -15,9 +15,45 @@ let _context = null;
 let _page = null;
 let _meta = { browser: null, site: null, cdp: false, mode: null, tabId: null };
 
+/**
+ * Cross-site fallbacks. Any URL works without a dedicated entry — a site block
+ * only overrides what it actually needs, and anything it omits falls back here.
+ * Accessible names and roles are preferred over hashed classes because they
+ * survive frontend redesigns.
+ */
+const GENERIC = {
+  messageSelectors: [
+    "[data-message-author-role]",
+    "[data-testid^='conversation-turn']",
+    "[data-message-id]",
+    "[class*='message']",
+    "[role='listitem']",
+    "article",
+  ],
+  roleAttr: "data-message-author-role",
+  composerSelectors: [
+    "[contenteditable='true']",
+    "textarea:not([readonly])",
+    "[role='textbox']",
+    "input[type='text']",
+  ],
+  sendSelectors: [
+    "button[aria-label*='Send' i]",
+    "button[data-testid*='send' i]",
+    "button[type='submit']",
+    "[role='button'][aria-label*='Send' i]",
+  ],
+  stopSelectors: [
+    "button[aria-label*='Stop' i]",
+    "button[data-testid*='stop' i]",
+    "[role='button'][aria-label*='Stop' i]",
+  ],
+};
+
 const SITES = {
   chatgpt: {
     url: "https://chatgpt.com/",
+    aliases: ["chat.openai.com"],
     messageSelectors: [
       "[data-message-author-role]",
       'article[data-testid^="conversation-turn"]',
@@ -42,6 +78,14 @@ const SITES = {
       'button[aria-label="Send prompt"]',
       'button[aria-label="Send message"]',
       'button[aria-label="Send"]',
+    ],
+    // Present only while a turn is streaming. Accessible names first — they
+    // survive redesigns better than hashed classes or test ids.
+    stopSelectors: [
+      'button[aria-label="Stop streaming"]',
+      'button[aria-label="Stop generating"]',
+      'button[aria-label*="Stop"]',
+      'button[data-testid="stop-button"]',
     ],
   },
   deepseek: {
@@ -115,8 +159,87 @@ const SITES = {
   },
 };
 
+/**
+ * User-defined sites from ~/.mailnotmilk/sites.json, so a new chat UI does not
+ * require a code change. Same shape as a SITES entry:
+ *   { "myai": { "url": "https://…", "sendSelectors": [...] } }
+ * Anything omitted falls back to GENERIC.
+ */
+function userSites() {
+  try {
+    const path = join(dataDir(), "sites.json");
+    if (!existsSync(path)) return {};
+    const parsed = JSON.parse(readFileSync(path, "utf8"));
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (err) {
+    console.error(`browser: ignoring sites.json — ${err.message}`);
+    return {};
+  }
+}
+
+export function allSites() {
+  return { ...SITES, ...userSites() };
+}
+
 export function listSites() {
-  return Object.keys(SITES);
+  return Object.keys(allSites());
+}
+
+/**
+ * Resolved config for a site key. Unknown keys (including "custom" for a bare
+ * URL) still get a full working profile from GENERIC rather than nothing.
+ */
+export function siteConfig(key) {
+  const site = allSites()[key] || {};
+  return { ...GENERIC, ...site };
+}
+
+/**
+ * Hostnames a site answers to, derived from its own `url` plus any `aliases`.
+ * Nothing is hand-written twice: change the url and matching follows. Aliases
+ * exist only for genuinely different domains serving the same product.
+ */
+function hostsForSite(cfg) {
+  const hosts = [];
+  for (const candidate of [cfg?.url, ...(cfg?.aliases || [])]) {
+    if (!candidate) continue;
+    try {
+      hosts.push(new URL(candidate.includes("://") ? candidate : `https://${candidate}`).hostname);
+    } catch {
+      /* unparseable entry — skip */
+    }
+  }
+  return hosts;
+}
+
+/** Match a URL against a host, allowing subdomains but not suffix spoofing. */
+function urlHasHost(url, host) {
+  try {
+    const actual = new URL(url).hostname.toLowerCase();
+    const want = host.toLowerCase();
+    return actual === want || actual.endsWith(`.${want}`);
+  } catch {
+    return false;
+  }
+}
+
+/** Substring the extension uses to find a tab; plain host, not a regex. */
+function urlIncludesForSite(key) {
+  return hostsForSite(allSites()[key])[0] || null;
+}
+
+/** Best-guess site key for any URL; null when nothing matches. */
+export function detectSiteFromUrl(url) {
+  if (!url) return null;
+  for (const [key, cfg] of Object.entries(allSites())) {
+    if (hostsForSite(cfg).some((host) => urlHasHost(url, host))) return key;
+  }
+  return null;
+}
+
+/** Does this URL belong to any site we know about? */
+function isKnownSiteUrl(url) {
+  return detectSiteFromUrl(url) !== null;
 }
 
 async function loadPlaywright() {
@@ -183,11 +306,7 @@ export async function browserConnect({
     const pages = _context.pages();
     // Prefer an existing ChatGPT tab if present
     _page =
-      pages.find((pg) =>
-        /chatgpt\.com|chat\.openai\.com|deepseek\.com|gemini\.google|claude\.ai|copilot\.microsoft/i.test(
-          pg.url()
-        )
-      ) ||
+      pages.find((pg) => isKnownSiteUrl(pg.url())) ||
       pages[0] ||
       (await _context.newPage());
   } else {
@@ -249,16 +368,6 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-function urlIncludesForSite(site) {
-  const map = {
-    chatgpt: "chatgpt\\.com|chat\\.openai\\.com",
-    deepseek: "deepseek\\.com",
-    claude: "claude\\.ai",
-    gemini: "gemini\\.google\\.com",
-    copilot: "copilot\\.microsoft\\.com",
-  };
-  return map[site] || null;
-}
 
 /** True when Cloudflare / bot-check interstitial is showing. */
 export async function isCloudflareChallenge() {
@@ -340,12 +449,23 @@ export async function browserOpenAi({ site = "deepseek", url = null } = {}) {
   let target = url;
   let siteKey = site;
   if (!target) {
-    const cfg = SITES[site];
-    if (!cfg) throw new Error(`Unknown site ${site}. Known: ${listSites().join(", ")}`);
-    target = cfg.url;
-    siteKey = site;
+    // A site key with no URL may still be a bare hostname the caller typed.
+    const cfg = allSites()[site];
+    if (cfg?.url) {
+      target = cfg.url;
+      siteKey = site;
+    } else if (site && /\./.test(site)) {
+      target = site.includes("://") ? site : `https://${site}`;
+      siteKey = detectSiteFromUrl(target) || "custom";
+    } else {
+      throw new Error(
+        `Unknown site ${site}. Known: ${listSites().join(", ")} — or pass a URL.`
+      );
+    }
   } else {
-    siteKey = site || "custom";
+    // Any URL is allowed. Recognise it when we can so the tuned selectors
+    // apply; otherwise "custom" falls back to GENERIC, which still works.
+    siteKey = detectSiteFromUrl(target) || site || "custom";
   }
 
   if (_meta.mode === "extension") {
@@ -356,7 +476,7 @@ export async function browserOpenAi({ site = "deepseek", url = null } = {}) {
     } catch {
       focused = null;
     }
-    if (!focused || !includes || !new RegExp(includes, "i").test(focused.url || "")) {
+    if (!focused || !includes || !urlHasHost(focused.url || "", includes)) {
       focused = await ext.extOpenUrl({ url: target });
     }
     _meta.site = siteKey;
@@ -431,7 +551,7 @@ export async function browserExtractMessages({ limit = 40 } = {}) {
     };
   }
 
-  const site = _meta.site && SITES[_meta.site] ? SITES[_meta.site] : null;
+  const site = siteConfig(_meta.site);
   const selectors = site?.messageSelectors || [
     "[data-message-author-role]",
     ".ds-message",
@@ -512,6 +632,131 @@ export async function browserExtractMessages({ limit = 40 } = {}) {
   };
 }
 
+/**
+ * Is the page currently streaming a reply?
+ *
+ * Returns true/false when we can tell, and null when we cannot (extension mode,
+ * or a site with no stop-button selectors). Null means "unknown" and callers
+ * must not read it as "finished" — that conflation is what let partial answers
+ * through.
+ */
+export async function browserIsGenerating() {
+  if (_meta.mode === "extension") return null;
+  const site = siteConfig(_meta.site);
+  const stopSelectors = site?.stopSelectors;
+  if (!stopSelectors?.length) return null;
+
+  const page = requirePage();
+  try {
+    return await page.evaluate((selectors) => {
+      for (const sel of selectors) {
+        for (const el of document.querySelectorAll(sel)) {
+          const style = window.getComputedStyle(el);
+          if (style.display === "none" || style.visibility === "hidden") continue;
+          if (el.offsetParent === null && style.position !== "fixed") continue;
+          return true;
+        }
+      }
+      return false;
+    }, stopSelectors);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Wait for an assistant turn that is actually finished.
+ *
+ * The old relay forwarded the first extraction whose text differed from the
+ * previous turn. Mid-stream that difference is already true, so a partial reply
+ * got posted as final — silently, since a half-written DOM node looks exactly
+ * like a complete one.
+ *
+ * Completion here needs two independent things to agree:
+ *   1. the text stopped growing for `idleMs` (quiescence), and
+ *   2. the page is not reporting an active stream (when it can report at all).
+ *
+ * Quiescence alone is not enough — a pause between tokens looks identical to an
+ * ending. The generating flag alone is not enough either, because it can flip
+ * before the last frame paints. Requiring both, and treating unknown as
+ * not-a-completion-signal, is what keeps partials out.
+ *
+ * @returns {Promise<{text: string, settled: boolean, reason: string} | null>}
+ */
+export function createTurnSettler({ prevText = null, idleMs = 1200 } = {}) {
+  let candidate = null;
+  let lastChangeAt = null;
+  let sawGenerating = false;
+
+  return {
+    /**
+     * Feed one observation. Returns a result once the turn looks complete,
+     * otherwise null (keep polling).
+     * @param {{text: string|null, generating: boolean|null, now: number}} obs
+     */
+    observe({ text, generating, now }) {
+      if (generating === true) sawGenerating = true;
+
+      if (text && text !== prevText && text !== candidate) {
+        candidate = text;
+        lastChangeAt = now;
+      }
+      if (!candidate) return null;
+
+      // Unknown generating state (extension mode) leaves quiescence as the only
+      // signal, so demand a longer quiet period before trusting it.
+      const quiet = generating === null ? idleMs * 2 : idleMs;
+      if (now - lastChangeAt < quiet) return null;
+      if (generating === true) return null;
+
+      return {
+        text: candidate,
+        settled: true,
+        reason: generating === false ? "idle+not-generating" : "idle-only",
+      };
+    },
+
+    /** Best available answer once time ran out. */
+    give_up() {
+      if (!candidate) return null;
+      return {
+        text: candidate,
+        settled: false,
+        reason: sawGenerating ? "timeout-mid-stream" : "timeout",
+      };
+    },
+  };
+}
+
+export async function waitForAssistantTurn({
+  prevText = null,
+  timeoutMs = 120_000,
+  idleMs = 1200,
+  pollMs = 400,
+} = {}) {
+  const deadline = Date.now() + Math.max(0, Number(timeoutMs) || 0);
+  const settler = createTurnSettler({ prevText, idleMs });
+
+  while (Date.now() < deadline) {
+    const extracted = await browserExtractMessages({ limit: 50 });
+    if (extracted.blocked) {
+      const partial = settler.give_up();
+      return partial ? { ...partial, reason: extracted.blocked } : null;
+    }
+
+    const done = settler.observe({
+      text: extracted.lastAssistant?.text || null,
+      generating: await browserIsGenerating(),
+      now: Date.now(),
+    });
+    if (done) return done;
+
+    await sleep(pollMs);
+  }
+
+  return settler.give_up();
+}
+
 export async function browserSendMessage({ text, submit = true } = {}) {
   if (!text) throw new Error("text required");
   if (_meta.mode === "extension") {
@@ -530,7 +775,7 @@ export async function browserSendMessage({ text, submit = true } = {}) {
       "Cloudflare challenge is showing — click Verify you are human, then retry send."
     );
   }
-  const site = _meta.site && SITES[_meta.site] ? SITES[_meta.site] : null;
+  const site = siteConfig(_meta.site);
   const composers = site?.composerSelectors || [
     "textarea",
     'div[contenteditable="true"]',

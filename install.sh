@@ -51,6 +51,6 @@ fi
 
 if [[ "$RUN_AFTER" -eq 1 ]]; then
   echo ""
-  echo "→ starting hub + relay (./run.sh)…"
+  echo "→ ensuring Chrome extension + starting hub/relay (./run.sh)…"
   exec "$ROOT/run.sh"
 fi

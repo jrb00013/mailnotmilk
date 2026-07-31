@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.2
+
+- `./run.sh` and `./install.sh --run` always (re)install the Chrome extension and launch Chrome with `--load-extension` if the extension has not said hello yet
+
 ## 1.6.1
 
 - Relay forwards ChatGPT **assistant** turns into the chat (was extracted then dropped)

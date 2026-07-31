@@ -20,13 +20,35 @@ function textOverlap(a, b, n = 80) {
   return x.includes(ay) || y.includes(ax);
 }
 
-function alreadyPosted(history, fromId, marker, snippet) {
-  return history.some(
-    (m) =>
-      m.from === fromId &&
-      m.text.includes(marker) &&
-      textOverlap(m.text, snippet, 80)
-  );
+/**
+ * Body of a previously posted "## From browser (…) role" message, minus the
+ * marker line and any relay annotation, so it can be length-compared.
+ */
+export function postedBody(text, marker) {
+  return text
+    .split(marker)
+    .pop()
+    .replace(/\n\n_\(relay:[^\n]*\)_\s*$/, "")
+    .trim();
+}
+
+export function alreadyPosted(history, fromId, marker, snippet) {
+  const incoming = (snippet || "").trim();
+  if (!incoming) return true;
+
+  return history.some((m) => {
+    if (m.from !== fromId || !m.text.includes(marker)) return false;
+    if (!textOverlap(m.text, incoming, 80)) return false;
+
+    // A partial and its finished version share a prefix, so prefix overlap
+    // alone would let the truncated post suppress the complete one. Treat a
+    // strictly longer continuation of what we already posted as new.
+    const existing = postedBody(m.text, marker);
+    if (incoming.length > existing.length && incoming.startsWith(existing.slice(0, 200))) {
+      return false;
+    }
+    return true;
+  });
 }
 
 /**
@@ -123,9 +145,12 @@ export async function relayTick({
   let lastAssistant = extracted.lastAssistant;
   const history0 = chatMessages(chat.id, { limit: 50 });
 
-  // 1) Forward ChatGPT (assistant) replies — the bug was dropping these
+  // 1) Forward assistant replies — the original bug was dropping these.
+  // Skip while a turn is actively streaming: whatever is on screen right now
+  // is a partial, and the next tick will pick it up once it settles.
   let forwardedAssistant = null;
-  if (lastAssistant?.text) {
+  const generatingNow = await browser.browserIsGenerating();
+  if (lastAssistant?.text && generatingNow !== true) {
     const marker = `## From browser (${site}) assistant`;
     if (!alreadyPosted(history0, fromId, marker, lastAssistant.text)) {
       forwardedAssistant = postToChat({
@@ -198,25 +223,30 @@ export async function relayTick({
         type: "system",
       });
 
-      // 5) Wait for a NEW assistant reply after inject, then forward it
-      const assistDeadline = Date.now() + Math.max(0, Number(waitAssistantMs) || 0);
-      while (Date.now() < assistDeadline) {
-        await new Promise((r) => setTimeout(r, 1500));
-        const again = await browser.browserExtractMessages({ limit: 50 });
-        if (again.blocked === "cloudflare") break;
-        const a = again.lastAssistant;
-        if (a?.text && a.text !== prevAssistant) {
-          const hist2 = chatMessages(chat.id, { limit: 50 });
-          const amarker = `## From browser (${site}) assistant`;
-          if (!alreadyPosted(hist2, fromId, amarker, a.text)) {
-            forwardedAssistant = postToChat({
-              chatId: chat.id,
-              from: fromId,
-              text: `${amarker}\n\n${a.text}`,
-            });
-            lastAssistant = a;
-          }
-          break;
+      // 5) Wait for a COMPLETE new assistant reply, then forward it.
+      // Forwarding on first-difference truncated mid-stream answers; the wait
+      // now requires the text to settle before we post.
+      const settledTurn = await browser.waitForAssistantTurn({
+        prevText: prevAssistant,
+        timeoutMs: Math.max(0, Number(waitAssistantMs) || 0),
+      });
+
+      if (settledTurn?.text) {
+        const hist2 = chatMessages(chat.id, { limit: 50 });
+        const amarker = `## From browser (${site}) assistant`;
+        if (!alreadyPosted(hist2, fromId, amarker, settledTurn.text)) {
+          // A capture that never settled is very likely a partial. Post it —
+          // dropping a reply is worse — but label it so a truncated answer is
+          // visible instead of silently passing as complete.
+          const suffix = settledTurn.settled
+            ? ""
+            : `\n\n_(relay: capture did not settle — ${settledTurn.reason}; may be truncated)_`;
+          forwardedAssistant = postToChat({
+            chatId: chat.id,
+            from: fromId,
+            text: `${amarker}\n\n${settledTurn.text}${suffix}`,
+          });
+          lastAssistant = { role: "assistant", text: settledTurn.text };
         }
       }
     }

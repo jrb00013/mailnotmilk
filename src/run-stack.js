@@ -1,6 +1,6 @@
 /**
  * Background hub + browser relay.
- * Prefer Chrome extension (normal shortcut, any site) → CDP → Playwright.
+ * Always (re)registers the Chrome extension, then prefers it → CDP → Playwright.
  */
 
 import { ensureHub, openUrl } from "./open.js";
@@ -8,14 +8,24 @@ import * as browser from "./browser.js";
 import { relayTick } from "./relay.js";
 import { cdpUp, ensureChromeCdp } from "./chrome-session.js";
 import * as ext from "./ext-bridge.js";
+import {
+  installChromeExtension,
+  extensionInstallHint,
+  launchChromeWithExtension,
+} from "./extension-install.js";
 import { dirname, join } from "node:path";
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { dataDir } from "./paths.js";
 
 export async function cdpAvailable(cdpUrl = "http://127.0.0.1:9222") {
   return cdpUp(cdpUrl);
 }
 
+/** Repo extension source (fallback). Prefer installed copy under dataDir. */
 export function extensionDir() {
+  const installed = join(dataDir(), "extension-dist", "extension");
+  if (existsSync(join(installed, "manifest.json"))) return installed;
   return join(dirname(fileURLToPath(import.meta.url)), "..", "extension");
 }
 
@@ -28,6 +38,17 @@ export async function waitForExtension({ timeoutMs = 15000 } = {}) {
     await new Promise((r) => setTimeout(r, 400));
   }
   return ext.extStatus();
+}
+
+function siteHomeUrl(site) {
+  const map = {
+    chatgpt: "https://chatgpt.com/",
+    deepseek: "https://chat.deepseek.com/",
+    claude: "https://claude.ai/new",
+    gemini: "https://gemini.google.com/app",
+    copilot: "https://copilot.microsoft.com/",
+  };
+  return map[site] || "https://chatgpt.com/";
 }
 
 /**
@@ -59,26 +80,53 @@ export async function runStack(opts = {}) {
     `mailnotmilk run: site=${site} peer=${peer} browser=${browserName}`
   );
 
+  // Always ensure extension is registered (same as ./install.sh)
+  let extInfo = null;
+  if (preferExtension) {
+    console.error("browser: ensuring Chrome extension is installed…");
+    try {
+      extInfo = installChromeExtension();
+      console.error(extensionInstallHint(extInfo));
+    } catch (err) {
+      console.error(`browser: extension auto-install failed: ${err.message}`);
+    }
+  }
+
   const hubUrl = await ensureHub(hubPort);
   console.error(`hub (api only): ${hubUrl}`);
 
   let attached = false;
+  const extDir = extInfo?.extDir || extensionDir();
 
   if (preferExtension) {
-    console.error(
-      `browser: waiting for Chrome extension (load unpacked once from):\n  ${extensionDir()}`
-    );
-    console.error(
-      "  Then open Chrome normally (shortcut), open any AI site, click extension → Use this tab."
-    );
-    const st = await waitForExtension({ timeoutMs: Number(opts.extWaitMs || 12000) });
+    let st = await waitForExtension({ timeoutMs: Number(opts.extWaitMs || 8000) });
+    if (!(st.connected || st.lastHello)) {
+      // Extension not talking yet — launch Chrome with --load-extension now
+      try {
+        launchChromeWithExtension(extDir, {
+          url: siteHomeUrl(site),
+          chromeBin: extInfo?.chromeBin || null,
+        });
+        console.error(
+          "browser: waiting for extension hello (open any AI tab; click Use this tab if needed)…"
+        );
+        st = await waitForExtension({
+          timeoutMs: Number(opts.extWaitMsAfterLaunch || 20000),
+        });
+      } catch (err) {
+        console.error(`browser: could not launch Chrome with extension: ${err.message}`);
+      }
+    }
+
     if (st.connected || st.lastHello) {
-      console.error("browser: Chrome extension connected — driving your normal tabs (any site)");
+      console.error(
+        "browser: Chrome extension connected — driving your normal tabs (any site)"
+      );
       await browser.browserConnect({ mode: "extension" });
       attached = true;
     } else {
       console.error(
-        "browser: extension not connected yet — install once: chrome://extensions → Load unpacked → extension/"
+        "browser: extension still silent — fully quit Chrome and reopen via your shortcut, then retry ./run.sh"
       );
     }
   }
@@ -88,12 +136,7 @@ export async function runStack(opts = {}) {
       cdpUrl,
       port,
       startIfMissing: opts.startChrome !== false,
-      openUrl:
-        site === "chatgpt"
-          ? "https://chatgpt.com/"
-          : site === "deepseek"
-            ? "https://chat.deepseek.com/"
-            : null,
+      openUrl: siteHomeUrl(site),
     });
     if (sess.ok) {
       console.error(
@@ -160,7 +203,6 @@ export async function runStack(opts = {}) {
           chatId,
           extracted: result.extracted,
           forwardedId: result.forwarded?.id || null,
-          forwardedAssistantId: result.forwardedAssistant?.id || null,
           peerReplyId: result.peerReply?.id || null,
           hub: hubUrl,
           browser: browser.browserStatus(),
