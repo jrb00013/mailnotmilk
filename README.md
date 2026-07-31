@@ -1,10 +1,9 @@
 # mailnotmilk
 
-[![ci](https://github.com/jrb00013/mailnotmilk/actions/workflows/ci.yml/badge.svg)](https://github.com/jrb00013/mailnotmilk/actions/workflows/ci.yml)
 
-Bridge **any browser AI** (ChatGPT, DeepSeek web, Gemini, Copilot, Claude.ai) with **Claude Code / Cursor / OpenCode** — MCP mailbox + Chrome/Firefox automation + Jayden-style skills install.
+Bridge **any browser AI** (ChatGPT, DeepSeek web, Gemini, Copilot, Claude.ai) with **Claude Code / Cursor / OpenCode** — MCP mailbox + Chrome/Firefox automation 
 
-## Install (Jayden-style, multiplatform)
+## Install 
 
 **Linux / macOS / WSL**
 ```bash
