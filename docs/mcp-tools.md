@@ -1,27 +1,19 @@
-# mailnotmilk MCP tools (v1.2)
+# mailnotmilk MCP tools (v1.4)
 
-## Chats (preferred)
+## Browser relay
+- `browser_connect` — chrome/firefox, launch or CDP
+- `browser_open_ai` — chatgpt|deepseek|claude|gemini|copilot|url
+- `browser_extract_messages` / `browser_send_message` / `browser_screenshot`
+- `browser_status` / `browser_disconnect`
+- `relay_tick` — browser ↔ mailnotmilk coding agent one cycle
 
+## Chats (preferred for paste bridges)
 | Tool | Purpose |
 |------|---------|
-| `create_chat` | New session → `invite.joinUrl` + `invite.peerPrompt` |
-| `join_chat` | Join with `invite_token` |
-| `chat_link` | Re-fetch invite bundle |
-| `chat_say` | Post into chat |
-| `chat_history` | Chronological messages |
-| `list_chats` | Recent sessions |
+| `create_chat` / `bridge_to_claude` | Join link + peer prompt |
+| `join_chat` / `chat_link` / `chat_say` / `chat_history` / `list_chats` | Chat ops |
 
-**Mail/send never auto-opens Claude or Cursor.** Share the link/prompt.
+## Messaging / inbox
+`post_message`, `post_handoff`, `post_turn`, `check_inbox`, `read_message`, `reply_message`, `get_thread`, `search_messages`, …
 
-## Messaging
-- `post_message` — text, optional `to`, `room`, `priority`, `tags`, `attachments`
-- `post_handoff` — structured task packet
-- `post_turn` — end-of-turn summary
-
-## Inbox / thread / search
-- `check_inbox`, `read_message`, `mark_unread`, `reply_message`, `get_thread`
-- `search_messages`, `list_history`, `archive_message`, `react_message`
-
-## Roster / awareness
-- `whoami`, `register_agent`, `list_agents`, `list_rooms`, `subscribe_room`
-- `set_status`, `get_status`, `mailbox_stats`, `mailbox_board`
+Install: `./install.sh install --tools all --skills --global-skills`
