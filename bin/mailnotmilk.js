@@ -327,6 +327,59 @@ program
   });
 
 program
+  .command("bootstrap <chatId>")
+  .description("Type a join prompt into a running agent terminal (needs xdotool)")
+  .option("--title <regex>", "Match the terminal window by title")
+  .option("--window <id>", "Target an explicit window id (0x…)")
+  .option("--print", "Only print the prompt; never type it")
+  .option("--no-submit", "Type the prompt but do not press Enter")
+  .action(async (chatId, opts) => {
+    const { getChat, buildInviteBundle } = await import("../src/chats.js");
+    const { injectIntoWindow, injectIntoMatchingWindow, findWindows, detectInjector } =
+      await import("../src/inject.js");
+
+    const chat = getChat(chatId);
+    if (!chat) {
+      console.error(`Unknown chat ${chatId}`);
+      process.exit(1);
+    }
+    const text = buildInviteBundle(chat).bootstrapPrompt;
+
+    if (opts.print) {
+      console.log(text);
+      return;
+    }
+    if (!opts.title && !opts.window) {
+      console.error("Pass --title <regex> or --window <id> (or --print to copy it yourself)");
+      process.exit(1);
+    }
+
+    const result = opts.window
+      ? injectIntoWindow({ windowId: opts.window, text, submit: opts.submit })
+      : injectIntoMatchingWindow({ titlePattern: opts.title, text, submit: opts.submit });
+
+    if (result.ok) {
+      console.log(`✓ typed into ${result.windowId} via ${result.tool}`);
+      return;
+    }
+
+    console.error(`✗ ${result.reason}`);
+    if (result.windows?.length) {
+      console.error("Matching windows:");
+      for (const w of result.windows) console.error(`  ${w.id}  ${w.title}`);
+    } else if (opts.title && !detectInjector()) {
+      const all = findWindows(opts.title);
+      if (all.length) {
+        console.error("Window found, but no injector installed:");
+        for (const w of all) console.error(`  ${w.id}  ${w.title}`);
+      }
+    }
+    console.error("\nPaste this into the agent terminal instead:\n");
+    console.error(text);
+    process.exit(1);
+  });
+
+program
   .command("relay")
   .description("Headless browser AI ↔ coding agent relay (no UI by default)")
   .option("--site <site>", "chatgpt|deepseek|claude|gemini|copilot", "chatgpt")

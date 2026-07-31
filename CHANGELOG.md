@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.5
+
+- **Fix: invite prompts hardcoded `agent_id="claude"`.** A chat created for any other peer (e.g. `claude-cutover`) produced a prompt that joined under the wrong id, so whoever was watching for the real peer never saw a message. The id now comes from the `peer` argument or the chat's own members, and any `claude-*` peer gets the Claude Code prompt.
+- `mailnotmilk bootstrap <chatId> --title <regex>` types a join prompt into an already-running agent terminal via xdotool. `--window <id>` targets one explicitly, `--print` just emits the text. Ambiguous title matches are refused rather than typed into the wrong terminal.
+- New `bootstrapPrompt` in the invite bundle: a single line (a newline would submit it half-written) that explains `join_chat` / `chat_history` / `chat_say` / `check_inbox`, the CLI fallback when MCP is not loaded, and which relay lines are echoes to ignore.
+
 ## 1.6.4
 
 - **Fix: Firefox opened `http://automationcontrolled/` on every launch.** The Chromium-only `--disable-blink-features=AutomationControlled` switch was passed to both engines, and Firefox treats an unrecognised argument as a URL. Chromium keeps the flag; Firefox gets none.

@@ -88,3 +88,46 @@ describe("hub", () => {
     assert.match(html, /API chat/);
   });
 });
+
+describe("invite peer id", () => {
+  it("uses the chat's real peer id, not a hardcoded 'claude'", () => {
+    const chat = createChat({
+      title: "Browser chatgpt ↔ claude-cutover",
+      createdBy: "web-ai",
+      members: ["claude-cutover"],
+    });
+    const inv = buildInviteBundle(chat, { from: "web-ai", peer: "claude-cutover" });
+    assert.match(inv.claudePrompt, /agent_id="claude-cutover"/);
+    assert.match(inv.claudePrompt, /--agent claude-cutover/);
+    assert.match(inv.claudePrompt, /--from claude-cutover/);
+    assert.ok(!/agent_id="claude"/.test(inv.claudePrompt), "must not join as bare claude");
+  });
+
+  it("infers the peer from chat members when not passed explicitly", () => {
+    const chat = createChat({
+      title: "t",
+      createdBy: "web-ai",
+      members: ["claude-alpha"],
+    });
+    const inv = buildInviteBundle(chat);
+    assert.match(inv.claudePrompt, /agent_id="claude-alpha"/);
+  });
+
+  it("still emits a Claude prompt for the plain 'claude' peer", () => {
+    const chat = createChat({ title: "t", createdBy: "web-ai", members: ["claude"] });
+    const inv = buildInviteBundle(chat, { peer: "claude" });
+    assert.match(inv.claudePrompt, /agent_id="claude"/);
+  });
+
+  it("maps claude-code to the claude agent id", () => {
+    const chat = createChat({ title: "t", createdBy: "web-ai", members: ["claude-code"] });
+    const inv = buildInviteBundle(chat, { peer: "claude-code" });
+    assert.match(inv.claudePrompt, /agent_id="claude"/);
+  });
+
+  it("leaves a non-claude peer on the generic prompt", () => {
+    const chat = createChat({ title: "t", createdBy: "web-ai", members: ["cursor"] });
+    const inv = buildInviteBundle(chat, { peer: "cursor" });
+    assert.ok(!/You are Claude Code/.test(inv.claudePrompt));
+  });
+});

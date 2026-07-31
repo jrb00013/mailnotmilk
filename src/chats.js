@@ -196,13 +196,27 @@ export function buildInviteBundle(chat, { hubBase, from = null, peer = null } = 
   let cursorPrompt = generic;
   let peerPrompt = generic;
 
-  if (peer === "claude" || peer === "claude-code" || !peer) {
+  // The joining agent must use the id the chat actually expects. Hardcoding
+  // "claude" meant a chat created for e.g. "claude-cutover" produced a prompt
+  // that joined under the wrong id, and whoever was watching for the real peer
+  // never saw a single message.
+  const memberIds = (chat.members || [])
+    .map((m) => (typeof m === "string" ? m : m?.agentId))
+    .filter(Boolean);
+  const peerId =
+    peer ||
+    memberIds.find((id) => id !== chat.createdBy && id !== "human") ||
+    "claude";
+  const isClaudePeer = /^claude(-|$)/i.test(peerId);
+
+  if (isClaudePeer) {
     const fromId = from || chat.createdBy || "deepseek";
+    const agentId = peerId === "claude-code" ? "claude" : peerId;
     claudePrompt = [
       `You are Claude Code. Join a live collaboration chat with ${fromId}.`,
       ``,
       `Do this now:`,
-      `1. join_chat invite_token="${chat.inviteToken}" agent_id="claude"`,
+      `1. join_chat invite_token="${chat.inviteToken}" agent_id="${agentId}"`,
       `2. chat_history chat_id="${chat.id}"`,
       `3. Reply with chat_say chat_id="${chat.id}"`,
       `4. Keep using this chat (check_inbox / chat_history) while collaborating`,
@@ -211,22 +225,43 @@ export function buildInviteBundle(chat, { hubBase, from = null, peer = null } = 
       `Hub: ${joinUrl}`,
       ``,
       `CLI fallback:`,
-      `  ${cli} chat join ${chat.inviteToken} --agent claude`,
-      `  ${cli} chat say ${chat.id} -t "hello" --from claude`,
+      `  ${cli} chat join ${chat.inviteToken} --agent ${agentId}`,
+      `  ${cli} chat say ${chat.id} -t "hello" --from ${agentId}`,
     ].join("\n");
     peerPrompt = claudePrompt;
   }
+
+  // Single-line form for typing into a live terminal: no blank lines, since a
+  // newline submits and would fire the prompt half-written.
+  const bootstrapPrompt =
+    `You are now bridged to a browser AI over mailnotmilk. ` +
+    `Join chat ${chat.id} as agent id "${peerId}" and keep the conversation going. ` +
+    `If you have the mailnotmilk MCP tools, use them: ` +
+    `join_chat(invite_token="${chat.inviteToken}", agent_id="${peerId}") to join, ` +
+    `chat_history(chat_id="${chat.id}") to read what has been said, ` +
+    `chat_say(chat_id="${chat.id}", text="...") to reply, ` +
+    `and check_inbox() to see new messages. ` +
+    `Poll chat_history or check_inbox periodically and answer anything addressed to you. ` +
+    `If those tools are not listed, the MCP server is not loaded in this session — ` +
+    `use the CLI instead: ${cli} chat join ${chat.inviteToken} --agent ${peerId} ` +
+    `then ${cli} chat say ${chat.id} -t "your reply" --from ${peerId} ` +
+    `and ${cli} chat log ${chat.id} to read. ` +
+    `Messages tagged "## From browser (...) assistant" are the browser AI talking to you; ` +
+    `ignore "## Relayed to browser" system lines and any "## From browser (...) user" echo of your own text. ` +
+    `Start by reading the history, then send one short message introducing what you are working on.`;
 
   return {
     chatId: chat.id,
     title: chat.title,
     room: chat.room,
     inviteToken: chat.inviteToken,
+    peerId,
     joinUrl,
     deepLink: deep,
     peerPrompt,
     cursorPrompt,
     claudePrompt,
+    bootstrapPrompt,
     note:
       "This does not pop open Claude/Cursor. Paste peerPrompt / claudePrompt into the other agent.",
   };
