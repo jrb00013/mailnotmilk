@@ -243,6 +243,7 @@ program
   .option("--site <site>", "chatgpt|deepseek|claude|gemini|copilot", "chatgpt")
   .option("--browser <b>", "chrome|firefox", "chrome")
   .option("--peer <id>", "Coding agent id", "claude")
+  .option("--chat <id>", "Reuse existing chat id")
   .option("--wait <ms>", "Wait for peer reply each tick", "20000")
   .option("--interval <ms>", "Loop interval", "8000")
   .option("--once", "Single tick then exit (default is loop)")
@@ -257,6 +258,7 @@ program
       site: opts.site,
       browser: opts.browser,
       peer: opts.peer,
+      chatId: opts.chat || null,
       waitMs: Number(opts.wait),
       intervalMs: Number(opts.interval),
       loop: !opts.once,

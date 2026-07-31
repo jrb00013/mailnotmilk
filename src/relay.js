@@ -157,7 +157,16 @@ export async function relayTick({
   const deadline = Date.now() + Math.max(0, Number(waitPeerMs) || 0);
 
   while (Date.now() <= deadline || waitPeerMs === 0) {
-    const history = chatMessages(chat.id, { limit: 40 });
+    const history = chatMessages(chat.id, { limit: 80 });
+    const relayedIds = new Set(
+      history
+        .filter((m) => m.text.includes("## Relayed to browser (msg #"))
+        .map((m) => {
+          const match = m.text.match(/## Relayed to browser \(msg #(\d+)\)/);
+          return match ? Number(match[1]) : null;
+        })
+        .filter(Boolean)
+    );
     peerReply =
       [...history]
         .reverse()
@@ -165,7 +174,8 @@ export async function relayTick({
           (m) =>
             m.from === peerId &&
             m.type !== "system" &&
-            !m.text.startsWith("## Relayed to browser")
+            !m.text.startsWith("## Relayed to browser") &&
+            !relayedIds.has(m.id)
         ) || null;
     if (peerReply || waitPeerMs === 0) break;
     await new Promise((r) => setTimeout(r, 500));
