@@ -1,14 +1,15 @@
 # mailnotmilk
 
-Use the `mailnotmilk` MCP server for cross-agent mail (Cursor ↔ Claude Code, etc.).
+Use the `mailnotmilk` MCP server for cross-agent mail.
 
 ## Habit
 
-- On start: `whoami`, then `register_agent`
-- Before/after real work: `check_inbox` (use `wait_ms` if expecting a peer)
-- Handoffs: `post_message` with clear markdown; replies: `reply_message`
-- Mark consumption with `read_message` so peers know you got it
+- Start: `whoami`, `register_agent`
+- Loop: `check_inbox` (use `wait_ms` when expecting a peer)
+- Tasks: `post_handoff` with title/objective/files/acceptance
+- Chatter: `post_message` (DM or room; `@mention` peers)
+- Finish a chunk: `post_turn`
+- Ack with `read_message`; continue via `reply_message` / `get_thread`
+- Situational awareness: `mailbox_board`
 
-## Slash command
-
-`/mailbox` — check inbox and handle pending mail.
+Slash: `/mailbox`

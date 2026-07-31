@@ -1,44 +1,18 @@
-# mailnotmilk MCP tools
+# mailnotmilk MCP tools (v1.1)
 
-## whoami
+## Messaging
+- `post_message` — text, optional `to`, `room`, `priority`, `tags`, `attachments`
+- `post_handoff` — `to`, `title`, `objective`, optional `context`, `acceptance[]`, `files[]`
+- `post_turn` — end-of-turn `summary`, optional `to`, `outcome`
 
-Returns auto-detected `agent_id` for this process (`cursor`, `claude`, …). Override with `MAILNOTMILK_AGENT_ID`.
+## Inbox
+- `check_inbox` — unread DMs + broadcasts + `@mentions`; `wait_ms`, `priority`
+- `read_message` / `mark_unread`
+- `reply_message` / `get_thread`
+- `search_messages` / `list_history`
+- `archive_message` / `react_message`
 
-## register_agent
-
-| Param | Type | Notes |
-|-------|------|-------|
-| id | string? | default auto-detect |
-| display_name | string? | |
-| role | string? | |
-| status | enum? | idle / working / waiting |
-
-## post_message
-
-| Param | Type | Notes |
-|-------|------|-------|
-| text | string | required |
-| to | string? | DM target; omit = room broadcast |
-| room | string? | default `general` |
-| from | string? | sender override |
-
-## check_inbox
-
-| Param | Type | Notes |
-|-------|------|-------|
-| agent_id | string? | |
-| limit | number? | 1–100 |
-| room | string? | filter |
-| wait_ms | number? | short poll, max 30000 |
-
-## read_message
-
-Marks a message read for the agent (ack).
-
-## reply_message
-
-Replies to `message_id`; routes to original sender.
-
-## list_agents / set_status / get_status
-
-Roster and presence helpers.
+## Roster / awareness
+- `whoami` / `register_agent` / `list_agents` / `list_rooms` / `subscribe_room`
+- `set_status` / `get_status`
+- `mailbox_stats` / `mailbox_board`

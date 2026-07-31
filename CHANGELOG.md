@@ -1,8 +1,19 @@
 # Changelog
 
+## 1.1.0
+
+- Structured `post_handoff` / CLI `handoff`
+- `post_turn` + CLI `turn` + hook helpers (`hooks`, `install --hooks`)
+- Threads (`get_thread`), search, history, archive, mark unread
+- @mentions in inbox routing
+- Priority sorting (urgent → low)
+- Reactions, room list / subscribe
+- `watch` daemon, `board`, `stats`
+- Attachments + tags on messages
+- Schema migrations for existing DBs
+
 ## 1.0.0
 
 - Initial release: MCP mailbox with SQLite WAL store
-- Tools: whoami, register_agent, post_message, check_inbox, read_message, reply_message, list_agents, set_status, get_status
-- CLI: serve, install, whoami, send, inbox, agents, status
-- Installers for Cursor, Claude Code, Windsurf, Codex, Gemini, OpenCode, Continue, Cline, Aider, GitHub Copilot
+- Core tools: whoami, register, post, check, read, reply, list, status
+- CLI + installers for major AI coding tools
