@@ -2,7 +2,11 @@
   "mcpServers": {
     "mailnotmilk": {
       "command": "npx",
-      "args": ["-y", "mailnotmilk", "serve"]
+      "args": [
+        "-y",
+        "mailnotmilk",
+        "serve"
+      ]
     }
   }
 }
