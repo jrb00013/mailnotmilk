@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.5.0
+
+- `./install.sh` / `install.cmd` / `install.ps1` **auto-install Playwright browsers** (no manual npm/npx step)
+- Multiplatform: Linux native, Windows WSL, Windows native, macOS
+- Chromium + Firefox + WebKit; Linux/WSL best-effort `install-deps`
+- `--browsers-only`, `--skip-browsers`, `--with-deps`, `--skip-deps`
+
 ## 1.4.0
 
 - Jayden-style `./install.sh install --tools all --skills --global-skills --target .`

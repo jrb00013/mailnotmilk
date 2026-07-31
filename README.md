@@ -4,31 +4,37 @@
 
 Bridge **any browser AI** (ChatGPT, DeepSeek web, Gemini, Copilot, Claude.ai) with **Claude Code / Cursor / OpenCode** — MCP mailbox + Chrome/Firefox automation + Jayden-style skills install.
 
-## Install (Jayden-style)
+## Install (Jayden-style, multiplatform)
 
+**Linux / macOS / WSL**
 ```bash
-git clone https://github.com/jrb00013/mailnotmilk.git
-cd mailnotmilk
-./install.sh install --tools all --skills --global-skills --target .
-# same as:
-# mailnotmilk install --tools all --skills --global-skills --target .
+./install.sh
+# or
+./install.sh install --tools all --skills --global-skills
 ```
 
-This writes:
-
-| Provider | MCP | Skills |
-|----------|-----|--------|
-| Cursor | `~/.cursor/mcp.json` + project `.cursor/mcp.json` | `.cursor/skills/*/SKILL.md` |
-| Claude Code | `~/.claude/settings.json` | `.claude/skills/*/SKILL.md` |
-| OpenCode | `~/.config/opencode/opencode.json` | `.opencode/skills/*/SKILL.md` |
-| Gemini / Copilot | settings / instructions | matching skill dirs |
-
-Browser automation:
-
-```bash
-npm i
-npx playwright install chromium firefox
+**Windows native**
+```bat
+install.cmd
 ```
+```powershell
+.\install.ps1
+```
+
+Install **automatically**:
+- MCP into Cursor / Claude Code / OpenCode / …
+- Skills (`mailnotmilk-bridge`, `browser-relay`) project + user-level
+- **Playwright + Chromium / Firefox / WebKit** (no manual `npx playwright install`)
+
+| Platform | Entrypoint | Browsers |
+|----------|------------|----------|
+| Linux native | `./install.sh` | chromium, firefox, webkit + `install-deps` (best-effort) |
+| Windows WSL | `./install.sh` | same (+ WSLg note for headed UI) |
+| macOS | `./install.sh` | chromium, firefox, webkit |
+| Windows native | `install.cmd` / `install.ps1` | chromium, firefox, webkit |
+
+Skip browsers: `--skip-browsers`. Browsers only: `mailnotmilk install --browsers-only`.
+Skip OS libs: `--skip-deps`. Force OS libs: `--with-deps`.
 
 ## Browser AI ↔ coding agent
 

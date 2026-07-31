@@ -118,7 +118,7 @@ async function loadPlaywright() {
     return _pw;
   } catch {
     const err = new Error(
-      "Playwright not installed. Run: npm install playwright && npx playwright install chromium firefox"
+      "Playwright not installed. Run ./install.sh (or install.cmd / install.ps1) — it auto-installs browsers."
     );
     err.code = "PLAYWRIGHT_MISSING";
     throw err;

@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "mailnotmilk": {
-      "command": "/home/joeblack/.local/share/cursor-agent/versions/2026.07.23-e383d2b/node",
+      "command": "/home/joeblack/.nvm/versions/node/v22.22.1/bin/node",
       "args": [
         "/home/joeblack/Documents/mailnotmilk/bin/mailnotmilk.js",
         "serve"

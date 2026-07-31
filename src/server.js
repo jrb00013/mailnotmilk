@@ -22,7 +22,7 @@ const priorityZ = z.enum(["low", "normal", "high", "urgent"]).optional();
 export function createServer() {
   const server = new McpServer({
     name: "mailnotmilk",
-    version: "1.4.0",
+    version: "1.5.0",
   });
 
   server.tool(

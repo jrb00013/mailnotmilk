@@ -1,7 +1,7 @@
 {
   "name": "mailnotmilk",
-  "version": "1.4.0",
-  "description": "Bridge browser AIs (ChatGPT/DeepSeek/…) with Claude Code, Cursor, and OpenCode — MCP mailbox, chat links, Chrome/Firefox relay, jayden-style install.sh.",
+  "version": "1.5.0",
+  "description": "Bridge browser AIs with Claude Code/Cursor/OpenCode — auto-installs Playwright on Linux, macOS, Windows native, and WSL.",
   "keywords": [
     "mcp",
     "mailbox",
@@ -37,6 +37,8 @@
     "docs/",
     "skills/",
     "install.sh",
+    "install.cmd",
+    "install.ps1",
     "README.md",
     "LICENSE",
     "CHANGELOG.md",
@@ -55,10 +57,8 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "commander": "^12.0.0",
+    "playwright": "^1.49.0",
     "zod": "^3.23.0"
-  },
-  "optionalDependencies": {
-    "playwright": "^1.49.0"
   },
   "engines": {
     "node": ">=22.5"

@@ -23,7 +23,7 @@ program
 
 program
   .command("install")
-  .description("Auto-configure AI tools + skills (jayden-style)")
+  .description("Auto-configure AI tools + skills + Playwright browsers (multiplatform)")
   .option("--all", "Install for all supported tools")
   .option("--tool <tool>", "Install for a specific tool")
   .option("--tools <list>", "Comma list or 'all' (jayden-compatible)")
@@ -31,7 +31,19 @@ program
   .option("--skills", "Install skills into --target providers")
   .option("--global-skills", "Install skills into ~/.cursor ~/.claude ~/.opencode …")
   .option("--hooks", "Also install turn-hook helpers")
+  .option("--skip-browsers", "Do not auto-install Playwright browser binaries")
+  .option("--browsers-only", "Only install Playwright + Chromium/Firefox/WebKit")
+  .option("--with-deps", "Force playwright install-deps (Linux/WSL)")
+  .option("--skip-deps", "Skip playwright install-deps")
   .action(async (opts) => {
+    if (opts.browsersOnly) {
+      const { ensureRelayRuntime } = await import("../src/playwright-setup.js");
+      await ensureRelayRuntime({
+        skipBrowsers: false,
+        withDeps: opts.skipDeps ? false : opts.withDeps ? true : null,
+      });
+      return;
+    }
     const { install, AVAILABLE_TOOLS } = await import("../src/install.js");
     let tools = null;
     if (opts.all || opts.tools === "all") tools = "all";
@@ -40,14 +52,19 @@ program
     else if (opts.skills || opts.globalSkills || opts.target) tools = "all";
     else {
       console.log("Supported tools:", AVAILABLE_TOOLS.join(", "));
-      console.log("Example: ./install.sh install --tools all --skills --global-skills");
-      console.log("Or: mailnotmilk install --all --skills");
+      console.log(
+        "Example: ./install.sh install --tools all --skills --global-skills"
+      );
+      console.log("Browsers install automatically unless --skip-browsers");
       process.exit(1);
     }
     await install(tools, {
       target: opts.target || null,
       skills: Boolean(opts.skills || opts.target),
       globalSkills: Boolean(opts.globalSkills),
+      browsers: true,
+      skipBrowsers: Boolean(opts.skipBrowsers),
+      withDeps: opts.skipDeps ? false : opts.withDeps ? true : null,
     });
     if (opts.hooks) {
       const turn = await import("../src/turn.js");

@@ -10,6 +10,11 @@ export {
   installSkillsForTarget,
   installSkillsGlobal,
 } from "./install.js";
+export {
+  detectPlatform,
+  ensureRelayRuntime,
+  ensurePlaywrightBrowsers,
+} from "./playwright-setup.js";
 export { formatInboxLines } from "./format.js";
 export { renderBoard } from "./board.js";
 export { watchInbox } from "./watch.js";

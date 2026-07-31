@@ -285,6 +285,9 @@ export async function install(tools, opts = {}) {
     target = null,
     skills = false,
     globalSkills = false,
+    browsers = true,
+    skipBrowsers = false,
+    withDeps = null,
   } = opts;
 
   const all = Object.keys(TOOL_INSTALLERS);
@@ -312,7 +315,12 @@ export async function install(tools, opts = {}) {
   if (skills || target) {
     const root = target || process.cwd();
     console.log(`\nInstalling skills into ${resolve(root)}...`);
-    installSkillsForTarget(root, skillProviders.length ? skillProviders : ["cursor", "claude", "opencode", "gemini", "copilot"]);
+    installSkillsForTarget(
+      root,
+      skillProviders.length
+        ? skillProviders
+        : ["cursor", "claude", "opencode", "gemini", "copilot"]
+    );
     mcpIntoProject(root);
   }
 
@@ -321,8 +329,20 @@ export async function install(tools, opts = {}) {
     installSkillsGlobal();
   }
 
+  if (browsers && !skipBrowsers) {
+    try {
+      const { ensureRelayRuntime } = await import("./playwright-setup.js");
+      await ensureRelayRuntime({ skipBrowsers: false, withDeps });
+    } catch (err) {
+      console.log(`  ✗ browser runtime: ${err.message}`);
+      console.log(
+        "  You can retry: mailnotmilk install --browsers-only"
+      );
+    }
+  }
+
   console.log("\nDone. Restart your AI tool to pick up MCP + skills.");
-  console.log("Browser relay needs: npm i playwright && npx playwright install chromium firefox");
+  console.log("Relay is ready when Playwright browsers installed successfully above.");
 }
 
 export const AVAILABLE_TOOLS = Object.keys(TOOL_INSTALLERS);

@@ -5,11 +5,12 @@ Use Playwright (Chrome **or** Firefox) to read/write web AI chats and relay thro
 ## Prerequisites
 
 ```bash
-./install.sh install --tools all --skills --global-skills
-npm i
-npx playwright install chromium firefox
-mailnotmilk hub   # optional UI
+./install.sh          # Linux/macOS/WSL — installs MCP, skills, AND Playwright browsers
+install.cmd           # Windows native
+# or: mailnotmilk install --browsers-only
 ```
+
+No separate `npx playwright install` step — install does it for your platform.
 
 ## One-shot relay
 
