@@ -9,8 +9,9 @@ Bridge **any browser AI** (ChatGPT, DeepSeek web, Gemini, Copilot, Claude.ai) wi
 **Linux / macOS / WSL**
 ```bash
 ./install.sh              # install MCP + skills + browsers
-./install.sh --run        # install, then start hub + ChatGPT relay
-./run.sh                  # hub + relay only (attach Chrome :9222 if available)
+./install.sh --run        # install, then headless hub API + relay
+./run.sh                  # headless by default (no windows)
+./run.sh --headed --once  # one-time visible login into persistent profile
 ./run.sh --site chatgpt --peer claude
 ```
 
