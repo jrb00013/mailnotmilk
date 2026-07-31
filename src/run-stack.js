@@ -160,6 +160,7 @@ export async function runStack(opts = {}) {
           chatId,
           extracted: result.extracted,
           forwardedId: result.forwarded?.id || null,
+          forwardedAssistantId: result.forwardedAssistant?.id || null,
           peerReplyId: result.peerReply?.id || null,
           hub: hubUrl,
           browser: browser.browserStatus(),
