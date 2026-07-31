@@ -1,17 +1,19 @@
 /**
  * Chrome / Firefox automation for web AI chats (ChatGPT, DeepSeek, …).
- * Uses Playwright when available; fails with install hint otherwise.
+ * Prefer mailnotmilk Chrome extension (normal Chrome shortcut, any site).
+ * Fallback: CDP / Playwright.
  */
 
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { dataDir, ensureDataDir } from "./paths.js";
+import * as ext from "./ext-bridge.js";
 
 let _pw = null;
 let _browser = null;
 let _context = null;
 let _page = null;
-let _meta = { browser: null, site: null, cdp: false };
+let _meta = { browser: null, site: null, cdp: false, mode: null, tabId: null };
 
 const SITES = {
   chatgpt: {
@@ -133,10 +135,16 @@ async function loadPlaywright() {
 
 export function browserStatus() {
   return {
-    connected: Boolean(_page),
+    connected:
+      _meta.mode === "extension"
+        ? Boolean(ext.extStatus().connected || ext.extStatus().lastHello)
+        : Boolean(_page),
     browser: _meta.browser,
     site: _meta.site,
     cdp: _meta.cdp,
+    mode: _meta.mode,
+    tabId: _meta.tabId,
+    extension: ext.extStatus(),
     url: _page ? _page.url() : null,
   };
 }
@@ -149,9 +157,21 @@ export async function browserConnect({
   profileDir = null,
 } = {}) {
   await browserDisconnect();
-  const pw = await loadPlaywright();
   const name = browser === "firefox" ? "firefox" : "chromium";
-  _meta = { browser: name, site: null, cdp: mode === "cdp" };
+
+  if (mode === "extension") {
+    _meta = {
+      browser: "chrome-extension",
+      site: null,
+      cdp: false,
+      mode: "extension",
+      tabId: null,
+    };
+    return browserStatus();
+  }
+
+  const pw = await loadPlaywright();
+  _meta = { browser: name, site: null, cdp: mode === "cdp", mode, tabId: null };
 
   if (mode === "cdp") {
     if (name !== "chromium") {
@@ -163,7 +183,11 @@ export async function browserConnect({
     const pages = _context.pages();
     // Prefer an existing ChatGPT tab if present
     _page =
-      pages.find((pg) => /chatgpt\.com|chat\.openai\.com|deepseek\.com|gemini\.google|claude\.ai|copilot\.microsoft/i.test(pg.url())) ||
+      pages.find((pg) =>
+        /chatgpt\.com|chat\.openai\.com|deepseek\.com|gemini\.google|claude\.ai|copilot\.microsoft/i.test(
+          pg.url()
+        )
+      ) ||
       pages[0] ||
       (await _context.newPage());
   } else {
@@ -198,7 +222,9 @@ export async function browserConnect({
 
 export async function browserDisconnect() {
   try {
-    if (_context && _meta.cdp === false) await _context.close();
+    if (_meta.mode === "extension") {
+      /* keep extension */
+    } else if (_context && _meta.cdp === false) await _context.close();
     else if (_browser) await _browser.close();
   } catch {
     /* ignore */
@@ -207,11 +233,14 @@ export async function browserDisconnect() {
   _browser = null;
   _context = null;
   _page = null;
-  _meta = { browser: null, site: null, cdp: false };
+  _meta = { browser: null, site: null, cdp: false, mode: null, tabId: null };
   return { ok: true };
 }
 
 function requirePage() {
+  if (_meta.mode === "extension") {
+    throw new Error("internal: Playwright page requested while in extension mode");
+  }
   if (!_page) throw new Error("Not connected — call browser_connect first");
   return _page;
 }
@@ -220,8 +249,35 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+function urlIncludesForSite(site) {
+  const map = {
+    chatgpt: "chatgpt\\.com|chat\\.openai\\.com",
+    deepseek: "deepseek\\.com",
+    claude: "claude\\.ai",
+    gemini: "gemini\\.google\\.com",
+    copilot: "copilot\\.microsoft\\.com",
+  };
+  return map[site] || null;
+}
+
 /** True when Cloudflare / bot-check interstitial is showing. */
 export async function isCloudflareChallenge() {
+  if (_meta.mode === "extension") {
+    try {
+      const data = await ext.extEval({
+        tabId: _meta.tabId,
+        code: `(() => {
+          const t = (document.title + " " + (document.body && document.body.innerText || "")).toLowerCase();
+          if (t.includes("just a moment") || t.includes("verify you are human")) return true;
+          if (document.querySelector("#challenge-stage, #cf-challenge-running, .cf-turnstile, iframe[src*='challenges.cloudflare']")) return true;
+          return false;
+        })()`,
+      });
+      return Boolean(data);
+    } catch {
+      return false;
+    }
+  }
   const page = requirePage();
   return page.evaluate(() => {
     const t = `${document.title || ""} ${(document.body && document.body.innerText) || ""}`.toLowerCase();
@@ -237,6 +293,21 @@ export async function isCloudflareChallenge() {
  * Returns { ok, waitedMs, challenge }.
  */
 export async function waitForCloudflareClear({ timeoutMs = 180_000 } = {}) {
+  if (_meta.mode === "extension") {
+    const start = Date.now();
+    let challenge = await isCloudflareChallenge();
+    if (!challenge) return { ok: true, waitedMs: 0, challenge: false };
+    console.error(
+      "browser: Cloudflare challenge in your Chrome tab — click Verify you are human."
+    );
+    while (Date.now() - start < timeoutMs) {
+      await sleep(1500);
+      if (!(await isCloudflareChallenge())) {
+        return { ok: true, waitedMs: Date.now() - start, challenge: true };
+      }
+    }
+    return { ok: false, waitedMs: Date.now() - start, challenge: true };
+  }
   const page = requirePage();
   const start = Date.now();
   let challenge = await isCloudflareChallenge();
@@ -249,12 +320,10 @@ export async function waitForCloudflareClear({ timeoutMs = 180_000 } = {}) {
     await sleep(1500);
     challenge = await isCloudflareChallenge();
     if (!challenge) {
-      // give ChatGPT a beat to render after CF
       await sleep(2000);
       console.error("browser: Cloudflare cleared");
       return { ok: true, waitedMs: Date.now() - start, challenge: true };
     }
-    // also bail early if composer appeared
     const hasComposer = await page
       .locator('#prompt-textarea, div[contenteditable="true"], textarea')
       .first()
@@ -268,7 +337,6 @@ export async function waitForCloudflareClear({ timeoutMs = 180_000 } = {}) {
 }
 
 export async function browserOpenAi({ site = "deepseek", url = null } = {}) {
-  const page = requirePage();
   let target = url;
   let siteKey = site;
   if (!target) {
@@ -279,6 +347,30 @@ export async function browserOpenAi({ site = "deepseek", url = null } = {}) {
   } else {
     siteKey = site || "custom";
   }
+
+  if (_meta.mode === "extension") {
+    const includes = urlIncludesForSite(siteKey);
+    let focused = null;
+    try {
+      focused = await ext.extFocusTab({ urlIncludes: includes });
+    } catch {
+      focused = null;
+    }
+    if (!focused || !includes || !new RegExp(includes, "i").test(focused.url || "")) {
+      focused = await ext.extOpenUrl({ url: target });
+    }
+    _meta.site = siteKey;
+    _meta.tabId = focused.tabId;
+    const cf = await waitForCloudflareClear({ timeoutMs: 180_000 });
+    return {
+      ...browserStatus(),
+      title: focused.title || null,
+      url: focused.url || target,
+      cloudflare: cf,
+    };
+  }
+
+  const page = requirePage();
   await page.goto(target, { waitUntil: "domcontentloaded", timeout: 60_000 });
   await sleep(1500);
   _meta.site = siteKey;
@@ -302,6 +394,28 @@ async function firstSelector(page, selectors) {
 }
 
 export async function browserExtractMessages({ limit = 40 } = {}) {
+  if (_meta.mode === "extension") {
+    if (await isCloudflareChallenge()) {
+      return {
+        site: _meta.site,
+        url: null,
+        count: 0,
+        messages: [],
+        lastAssistant: null,
+        lastUser: null,
+        blocked: "cloudflare",
+        error:
+          "Cloudflare challenge is showing — click Verify you are human in Chrome, then retry.",
+      };
+    }
+    const data = await ext.extExtract({ tabId: _meta.tabId, limit });
+    if (data?.tabId) _meta.tabId = data.tabId;
+    return {
+      site: _meta.site,
+      ...data,
+    };
+  }
+
   const page = requirePage();
   if (await isCloudflareChallenge()) {
     return {
@@ -400,6 +514,16 @@ export async function browserExtractMessages({ limit = 40 } = {}) {
 
 export async function browserSendMessage({ text, submit = true } = {}) {
   if (!text) throw new Error("text required");
+  if (_meta.mode === "extension") {
+    if (await isCloudflareChallenge()) {
+      throw new Error(
+        "Cloudflare challenge is showing — click Verify you are human, then retry send."
+      );
+    }
+    const data = await ext.extSend({ text, tabId: _meta.tabId, submit });
+    if (data?.tabId) _meta.tabId = data.tabId;
+    return { ok: true, site: _meta.site, ...data };
+  }
   const page = requirePage();
   if (await isCloudflareChallenge()) {
     throw new Error(

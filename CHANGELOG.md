@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **Fix: Claude Code MCP install never took effect.** The server was written only to `~/.claude/settings.json`, which Claude Code does not read `mcpServers` from — so `join_chat`/`chat_say`/`check_inbox` never appeared in a session. Now writes `~/.claude.json` (the canonical user scope) as well.
+- Config edits are merge-not-clobber: a parse error aborts instead of silently resetting the file to `{}`, and every rewritten config gets a `.bak`. Previously a malformed `~/.claude.json` or a project `.mcp.json` holding other servers could be wiped.
+- Install output tells you how to verify: restart Claude Code, then `claude mcp list`.
+
 ## 1.5.5
 
 - Detect Cloudflare challenge; wait for “Verify you are human” instead of silently extracting 0 messages

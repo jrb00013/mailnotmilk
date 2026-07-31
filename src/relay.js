@@ -26,7 +26,13 @@ export async function relayTick({
 } = {}) {
   const status = browser.browserStatus();
   if (!status.connected) {
-    await browser.browserConnect({ browser: "chrome", mode: "launch", headless: true });
+    // Prefer extension (normal Chrome); else headed Playwright
+    const ext = await import("./ext-bridge.js");
+    if (ext.extStatus().connected || ext.extStatus().lastHello) {
+      await browser.browserConnect({ mode: "extension" });
+    } else {
+      await browser.browserConnect({ browser: "chrome", mode: "launch", headless: false });
+    }
     await browser.browserOpenAi({ site });
   } else if (!status.site || status.site === "custom") {
     await browser.browserOpenAi({ site });

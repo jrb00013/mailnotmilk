@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-# Hub API + browser relay using your Chrome session. No login. No hub UI.
+# Hub API + browser relay via Chrome extension (normal shortcut, any site).
+# One-time: mailnotmilk extension → Load unpacked
 # Usage:
 #   ./run.sh
-#   ./run.sh --site chatgpt --peer claude
-#   ./run.sh --no-session     # Playwright only
-#   ./run.sh --open           # optional hub UI
+#   ./run.sh --site deepseek --peer claude
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -26,4 +25,5 @@ if [[ ! -d "$ROOT/node_modules/playwright" ]]; then
   (cd "$ROOT" && "$NODE" "$CLI" install --browsers-only --skip-deps) || true
 fi
 
+echo "Extension folder (Load unpacked once if needed): $ROOT/extension" >&2
 exec "$NODE" "$CLI" run "$@"

@@ -238,7 +238,7 @@ program
 program
   .command("run")
   .description(
-    "Background hub API + browser relay. Uses your Chrome session when possible; never asks you to log in."
+    "Hub + relay. Prefers Chrome extension (normal shortcut, any site). No --remote-debugging-port needed."
   )
   .option("--site <site>", "chatgpt|deepseek|claude|gemini|copilot", "chatgpt")
   .option("--browser <b>", "chrome|firefox", "chrome")
@@ -248,7 +248,8 @@ program
   .option("--once", "Single tick then exit (default is loop)")
   .option("--headed", "If falling back to Playwright launch, show the window")
   .option("--open", "Also open the hub UI in a browser tab (off by default)")
-  .option("--no-session", "Skip Chrome CDP; force Playwright launch")
+  .option("--no-extension", "Skip waiting for Chrome extension")
+  .option("--no-session", "Skip Chrome CDP fallback")
   .option("--cdp-url <url>", "Chrome CDP URL", "http://127.0.0.1:9222")
   .action(async (opts) => {
     const { runStack } = await import("../src/run-stack.js");
@@ -261,9 +262,29 @@ program
       loop: !opts.once,
       headless: !opts.headed,
       cdpUrl: opts.cdpUrl,
+      preferExtension: opts.extension !== false,
       useSession: opts.session !== false,
       openBrowser: Boolean(opts.open),
     });
+  });
+
+program
+  .command("extension")
+  .description("Print Chrome extension install path (Load unpacked — once)")
+  .action(async () => {
+    const { extensionDir } = await import("../src/run-stack.js");
+    const dir = extensionDir();
+    console.log(dir);
+    console.error(`
+Install once:
+  1. Open chrome://extensions
+  2. Enable Developer mode
+  3. Load unpacked → select:
+     ${dir}
+  4. Open Chrome with your normal shortcut (no flags)
+  5. Open any AI site → click mailnotmilk → Use this tab
+  6. Run: ./run.sh
+`);
   });
 
 program

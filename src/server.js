@@ -491,29 +491,36 @@ export function createServer() {
 
   server.tool(
     "browser_connect",
-    "Attach to the user's Chrome via CDP (preferred) or launch Playwright. Never asks the user to log in — auth is optional; drive whatever page/session is open.",
+    "Connect to browser AI tabs. Prefer mode=extension (normal Chrome + mailnotmilk extension, any site, no --remote-debugging-port). Fallbacks: cdp, launch.",
     {
       browser: z.enum(["chrome", "firefox"]).optional(),
-      mode: z.enum(["launch", "cdp"]).optional(),
+      mode: z.enum(["extension", "launch", "cdp"]).optional(),
       cdp_url: z.string().optional().describe("For mode=cdp, e.g. http://127.0.0.1:9222"),
       headless: z
         .boolean()
         .optional()
-        .describe("Only for mode=launch. Default true. Login not required either way."),
+        .describe("Only for mode=launch. Default true."),
     },
     async ({ browser, mode, cdp_url, headless }) => {
       const b = await import("./browser.js");
-      let resolvedMode = mode || "launch";
-      let cdpUrl = cdp_url || "http://127.0.0.1:9222";
-      if (!mode && (browser || "chrome") !== "firefox") {
-        const { ensureChromeCdp } = await import("./chrome-session.js");
-        const sess = await ensureChromeCdp({ cdpUrl, startIfMissing: true });
-        if (sess.ok) resolvedMode = "cdp";
+      const ext = await import("./ext-bridge.js");
+      let resolvedMode = mode || null;
+      if (!resolvedMode) {
+        const st = ext.extStatus();
+        if (st.connected || st.lastHello) resolvedMode = "extension";
+        else {
+          const { ensureChromeCdp } = await import("./chrome-session.js");
+          const sess = await ensureChromeCdp({
+            cdpUrl: cdp_url || "http://127.0.0.1:9222",
+            startIfMissing: false,
+          });
+          resolvedMode = sess.ok ? "cdp" : "extension";
+        }
       }
       const status = await b.browserConnect({
         browser: browser || "chrome",
         mode: resolvedMode,
-        cdpUrl,
+        cdpUrl: cdp_url || "http://127.0.0.1:9222",
         headless: headless === undefined ? true : Boolean(headless),
       });
       return textResult({ ok: true, status, mode: resolvedMode });

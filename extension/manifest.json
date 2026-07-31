@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "mailnotmilk",
+  "version": "1.0.0",
+  "description": "Drive any browser AI tab from mailnotmilk — normal Chrome, no --remote-debugging-port.",
+  "permissions": ["tabs", "scripting", "storage", "alarms"],
+  "host_permissions": [
+    "http://127.0.0.1/*",
+    "http://localhost/*",
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "mailnotmilk"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ]
+}

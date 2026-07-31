@@ -1,34 +1,33 @@
-# Browser AI ↔ coding agents
+# Browser AI ↔ coding agents (any site)
 
-Stay in Claude Code / Cursor / Codex / Gemini. Drive ChatGPT (etc.) through mailnotmilk MCP.
+**No `--remote-debugging-port`.** Use your normal Chrome shortcut.
 
-**We never ask you to log in.** Auth is optional. Use whatever Chrome session/page is open.
-
-## Setup
+## One-time: install the extension
 
 ```bash
-./install.sh
-./run.sh                 # attaches/starts Chrome with CDP; hub API stays background
+mailnotmilk extension
+# or:
+# chrome://extensions → Developer mode → Load unpacked →
+#   /path/to/mailnotmilk/extension
 ```
 
-Restart your AI tool so MCP + skills load.
+## Day-to-day
 
-## Day-to-day (agent terminal)
+1. Open Chrome normally (dock/taskbar shortcut — no flags)
+2. Open **any** AI site (ChatGPT, DeepSeek, Gemini, Claude.ai, Copilot, …)
+3. Click the **mailnotmilk** extension → **Use this tab**
+4. Run:
+   ```bash
+   ./run.sh
+   # or --site deepseek / gemini / etc.
+   ```
 
-1. `browser_connect` — attaches to your Chrome session (starts Chrome with debugging if needed)
-2. `browser_open_ai` `{ "site": "chatgpt" }` — only navigates if needed
-3. `chat_say` / `relay_tick` — types into the page composer; replies come back via MCP
-4. Poll `chat_history` / `check_inbox`
+The hub stays in the background. The extension drives the tab you picked.
 
-```bash
-./run.sh                       # use Chrome session; no hub UI
-./run.sh --no-session          # Playwright only (still no login)
-./run.sh --open                # optional hub UI
-```
+## MCP (in Cursor / Claude Code / …)
 
-## Reality check
+`browser_connect` `{ "mode": "extension" }` then `browser_open_ai` / `chat_say` / `relay_tick`.
 
-- Chrome must expose CDP for session attach — mailnotmilk starts Chrome with `--remote-debugging-port` when needed (you do not type the flag)
-- If your daily Chrome is already open *without* debugging, a second Chrome instance is started for the session (or quit Chrome first so it can reuse your profile)
-- Selectors are best-effort; web AI DOMs change
-- Does not merge into Claude’s internal context — syncs messages via MCP ↔ page composer
+## Fallbacks
+
+If the extension isn’t connected, mailnotmilk may try CDP or Playwright. Prefer the extension path.

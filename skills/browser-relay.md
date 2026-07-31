@@ -1,8 +1,8 @@
 ---
 name: browser-relay
 description: >-
-  Drive ChatGPT/DeepSeek/etc via the user's browser session + mailnotmilk MCP.
-  Never ask the user to log in — auth is optional.
+  Drive any browser AI tab via the mailnotmilk Chrome extension (normal Chrome
+  shortcut — no --remote-debugging-port). Works for ChatGPT, DeepSeek, Gemini, etc.
 allowed-tools: CallMcpTool, Shell
 ---
 
@@ -10,19 +10,26 @@ allowed-tools: CallMcpTool, Shell
 
 ## Goal
 
-Stay in the coding-agent terminal. Messages go into the browser AI composer; replies come back via MCP. **Do not ask the user to sign in.**
+Stay in the coding-agent terminal. Messages go into **whatever AI site tab** the user has open in normal Chrome.
 
-## Tools
+## Setup (once)
 
-| Tool | Use |
-|------|-----|
-| `browser_connect` | Prefer attach to user's Chrome (CDP). Starts Chrome with debugging if needed |
-| `browser_open_ai` | Navigate only if needed |
-| `browser_extract_messages` / `browser_send_message` | Read / type |
-| `relay_tick` / `chat_say` / `chat_history` | Same mailnotmilk session as the peer |
+```bash
+mailnotmilk extension
+```
+
+Load unpacked from that folder in `chrome://extensions`. Then use the normal Chrome shortcut forever.
+
+## Flow
+
+1. User opens Chrome normally + any AI site
+2. Extension → **Use this tab**
+3. `browser_connect` `{ "mode": "extension" }`
+4. `browser_open_ai` / `relay_tick` / `chat_say`
 
 ## Rules
 
-- Never instruct the user to log into ChatGPT / DeepSeek / etc.
-- Never open the hub UI unless they ask
-- Prefer their browser session over a separate Playwright profile
+- Never require `--remote-debugging-port`
+- Never ask the user to log in
+- Never open the hub UI unless asked
+- Works for **any** http(s) chat UI, not just ChatGPT

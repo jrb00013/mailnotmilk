@@ -14,6 +14,7 @@ import {
 import { detectProvider } from "./identity.js";
 import { getDb } from "./store.js";
 import { renderBoard } from "./board.js";
+import * as ext from "./ext-bridge.js";
 
 const DEFAULT_PORT = Number(process.env.MAILNOTMILK_HUB_PORT || 7879);
 
@@ -290,6 +291,26 @@ export function createHubServer({ port = DEFAULT_PORT } = {}) {
           200,
           pageShell("Board", `<div class="card"><pre>${escapeHtml(renderBoard())}</pre></div>`)
         );
+      }
+
+      if (path === "/api/ext/status" && req.method === "GET") {
+        return json(res, 200, ext.extStatus());
+      }
+
+      if (path === "/api/ext/hello" && req.method === "POST") {
+        const body = await readBody(req);
+        return json(res, 200, ext.noteExtHello(body));
+      }
+
+      if (path === "/api/ext/next" && req.method === "GET") {
+        const timeoutMs = Number(url.searchParams.get("timeoutMs") || 25000);
+        const command = await ext.takeExtCommand({ timeoutMs });
+        return json(res, 200, { command });
+      }
+
+      if (path === "/api/ext/result" && req.method === "POST") {
+        const body = await readBody(req);
+        return json(res, 200, ext.resolveExtResult(body));
       }
 
       if (path === "/api/chats" && req.method === "GET") {

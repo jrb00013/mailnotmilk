@@ -34,19 +34,34 @@ function resolveServerCmd() {
   return { command: "npx", args: ["-y", "mailnotmilk", "serve"] };
 }
 
-function readJson(path, fallback = {}) {
-  if (!existsSync(path)) return fallback;
-  try {
-    return JSON.parse(readFileSync(path, "utf8"));
-  } catch {
-    return fallback;
-  }
-}
-
 function writeJson(path, data) {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify(data, null, 2) + "\n");
   console.log(`  ✓ ${path}`);
+}
+
+/**
+ * Read-modify-write a JSON config we do not own.
+ *
+ * Treating a parse error as "empty config" is catastrophic for ~/.claude.json —
+ * that file holds the user's whole Claude Code state. Refuse to touch anything
+ * we cannot parse, and keep a .bak of everything we rewrite.
+ */
+function mergeJson(path, mutate) {
+  let config = {};
+  if (existsSync(path)) {
+    const raw = readFileSync(path, "utf8");
+    try {
+      config = JSON.parse(raw);
+    } catch (err) {
+      throw new Error(
+        `${path} is not valid JSON (${err.message}) — refusing to overwrite it. Fix it, then re-run install.`
+      );
+    }
+    writeFileSync(`${path}.bak`, raw);
+  }
+  mutate(config);
+  writeJson(path, config);
 }
 
 function writeText(path, content) {
@@ -157,26 +172,36 @@ export function installSkillsGlobal() {
 
 function mcpIntoProject(target) {
   const root = resolve(target);
-  writeJson(join(root, ".cursor", "mcp.json"), {
-    mcpServers: {
-      mailnotmilk: {
-        ...MCP_ENTRY,
-        env: { MAILNOTMILK_AGENT_ID: process.env.MAILNOTMILK_AGENT_ID || "deepseek" },
+  mergeJson(join(root, ".cursor", "mcp.json"), (config) => {
+    config.mcpServers = config.mcpServers || {};
+    config.mcpServers.mailnotmilk = {
+      ...MCP_ENTRY,
+      env: {
+        MAILNOTMILK_AGENT_ID: process.env.MAILNOTMILK_AGENT_ID || "deepseek",
       },
-    },
+    };
   });
-  writeJson(join(root, ".mcp.json"), {
-    mcpServers: { mailnotmilk: MCP_ENTRY },
+  mergeJson(join(root, ".mcp.json"), (config) => {
+    config.mcpServers = config.mcpServers || {};
+    config.mcpServers.mailnotmilk = MCP_ENTRY;
   });
 }
 
 const TOOL_INSTALLERS = {
   "claude-code": () => {
-    const settingsPath = join(HOME, ".claude", "settings.json");
-    const settings = readJson(settingsPath);
-    settings.mcpServers = settings.mcpServers || {};
-    settings.mcpServers.mailnotmilk = MCP_ENTRY;
-    writeJson(settingsPath, settings);
+    // Canonical user-scope MCP config for Claude Code is ~/.claude.json.
+    // ~/.claude/settings.json does NOT load mcpServers — servers written only
+    // there are silently ignored and the tools never appear in a session.
+    mergeJson(join(HOME, ".claude.json"), (config) => {
+      config.mcpServers = config.mcpServers || {};
+      config.mcpServers.mailnotmilk = MCP_ENTRY;
+    });
+
+    // Also write settings.json for forward/other-client compatibility.
+    mergeJson(join(HOME, ".claude", "settings.json"), (settings) => {
+      settings.mcpServers = settings.mcpServers || {};
+      settings.mcpServers.mailnotmilk = MCP_ENTRY;
+    });
 
     const cmdDir = join(HOME, ".claude", "commands");
     mkdirSync(cmdDir, { recursive: true });
@@ -199,25 +224,23 @@ mailnotmilk bridge / inbox.
   },
 
   cursor: () => {
-    const configPath = join(HOME, ".cursor", "mcp.json");
-    const config = readJson(configPath);
-    config.mcpServers = config.mcpServers || {};
-    config.mcpServers.mailnotmilk = {
-      ...MCP_ENTRY,
-      env: {
-        MAILNOTMILK_AGENT_ID: process.env.MAILNOTMILK_AGENT_ID || "deepseek",
-      },
-    };
-    writeJson(configPath, config);
+    mergeJson(join(HOME, ".cursor", "mcp.json"), (config) => {
+      config.mcpServers = config.mcpServers || {};
+      config.mcpServers.mailnotmilk = {
+        ...MCP_ENTRY,
+        env: {
+          MAILNOTMILK_AGENT_ID: process.env.MAILNOTMILK_AGENT_ID || "deepseek",
+        },
+      };
+    });
     mcpIntoProject(PKG_ROOT);
   },
 
   windsurf: () => {
-    const configPath = join(HOME, ".codeium", "windsurf", "mcp_config.json");
-    const config = readJson(configPath);
-    config.mcpServers = config.mcpServers || {};
-    config.mcpServers.mailnotmilk = MCP_ENTRY;
-    writeJson(configPath, config);
+    mergeJson(join(HOME, ".codeium", "windsurf", "mcp_config.json"), (config) => {
+      config.mcpServers = config.mcpServers || {};
+      config.mcpServers.mailnotmilk = MCP_ENTRY;
+    });
   },
 
   codex: () => {
@@ -225,32 +248,30 @@ mailnotmilk bridge / inbox.
   },
 
   gemini: () => {
-    const settingsPath = join(HOME, ".gemini", "settings.json");
-    const settings = readJson(settingsPath);
-    settings.mcpServers = settings.mcpServers || {};
-    settings.mcpServers.mailnotmilk = MCP_ENTRY;
-    writeJson(settingsPath, settings);
+    mergeJson(join(HOME, ".gemini", "settings.json"), (settings) => {
+      settings.mcpServers = settings.mcpServers || {};
+      settings.mcpServers.mailnotmilk = MCP_ENTRY;
+    });
   },
 
   opencode: () => {
-    const configPath = join(HOME, ".config", "opencode", "opencode.json");
-    const config = readJson(configPath);
-    config.mcp = config.mcp || {};
-    config.mcp.servers = config.mcp.servers || {};
-    config.mcp.servers.mailnotmilk = MCP_ENTRY;
-    writeJson(configPath, config);
+    mergeJson(join(HOME, ".config", "opencode", "opencode.json"), (config) => {
+      config.mcp = config.mcp || {};
+      config.mcp.servers = config.mcp.servers || {};
+      config.mcp.servers.mailnotmilk = MCP_ENTRY;
+    });
   },
 
   continue: () => {
-    const configPath = join(HOME, ".continue", "config.json");
-    const config = readJson(configPath);
-    config.mcpServers = config.mcpServers || [];
-    if (!config.mcpServers.find((s) => s.name === "mailnotmilk")) {
-      config.mcpServers.push({ name: "mailnotmilk", ...MCP_ENTRY });
-      writeJson(configPath, config);
-    } else {
-      console.log(`  ~ ${configPath} (already configured)`);
-    }
+    mergeJson(join(HOME, ".continue", "config.json"), (config) => {
+      config.mcpServers = config.mcpServers || [];
+      const existing = config.mcpServers.findIndex(
+        (s) => s.name === "mailnotmilk"
+      );
+      const entry = { name: "mailnotmilk", ...MCP_ENTRY };
+      if (existing >= 0) config.mcpServers[existing] = entry;
+      else config.mcpServers.push(entry);
+    });
   },
 
   cline: () => {
@@ -350,11 +371,21 @@ export async function install(tools, opts = {}) {
   }
 
   console.log("\nDone. Restart your AI tool to pick up MCP + skills.");
-  console.log("Run hub+relay:  ./run.sh");
-  console.log("Or:            ./install.sh --run");
-  console.log(
-    "ChatGPT tab: start Chrome with --remote-debugging-port=9222 then ./run.sh"
-  );
+  if (targets.includes("claude-code")) {
+    console.log(
+      "Claude Code: MCP is loaded at startup — restart it (or /mcp → reconnect),"
+    );
+    console.log("             then verify with:  claude mcp list");
+  }
+  try {
+    const { extensionDir } = await import("./run-stack.js");
+    console.log("\nChrome extension (once — then normal Chrome shortcut, any AI site):");
+    console.log(`  chrome://extensions → Load unpacked → ${extensionDir()}`);
+    console.log("  Or: mailnotmilk extension");
+  } catch {
+    console.log("\nChrome extension: mailnotmilk extension");
+  }
+  console.log("Then: ./run.sh   (no --remote-debugging-port)");
 }
 
 export const AVAILABLE_TOOLS = Object.keys(TOOL_INSTALLERS);

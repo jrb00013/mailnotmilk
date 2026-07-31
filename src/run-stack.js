@@ -1,15 +1,33 @@
 /**
- * Background hub + browser relay. No login flow. No hub UI by default.
- * Prefer attaching to the user's Chrome session via CDP when possible.
+ * Background hub + browser relay.
+ * Prefer Chrome extension (normal shortcut, any site) → CDP → Playwright.
  */
 
 import { ensureHub, openUrl } from "./open.js";
 import * as browser from "./browser.js";
 import { relayTick } from "./relay.js";
 import { cdpUp, ensureChromeCdp } from "./chrome-session.js";
+import * as ext from "./ext-bridge.js";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export async function cdpAvailable(cdpUrl = "http://127.0.0.1:9222") {
   return cdpUp(cdpUrl);
+}
+
+export function extensionDir() {
+  return join(dirname(fileURLToPath(import.meta.url)), "..", "extension");
+}
+
+/** Wait until the Chrome extension has said hello (or timeout). */
+export async function waitForExtension({ timeoutMs = 15000 } = {}) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const st = ext.extStatus();
+    if (st.connected || st.lastHello) return st;
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  return ext.extStatus();
 }
 
 /**
@@ -29,7 +47,7 @@ export async function runStack(opts = {}) {
       ? process.env.MAILNOTMILK_HEADED !== "1"
       : Boolean(opts.headless);
   const openBrowser = Boolean(opts.openBrowser);
-  // Default: use the user's Chrome session (CDP). Login is never required.
+  const preferExtension = opts.preferExtension !== false;
   const useSession =
     opts.useSession !== false &&
     process.env.MAILNOTMILK_NO_SESSION !== "1" &&
@@ -38,14 +56,34 @@ export async function runStack(opts = {}) {
   const port = Number(new URL(cdpUrl).port || 9222);
 
   console.error(
-    `mailnotmilk run: site=${site} peer=${peer} browser=${browserName} session=${useSession}`
+    `mailnotmilk run: site=${site} peer=${peer} browser=${browserName}`
   );
 
   const hubUrl = await ensureHub(hubPort);
   console.error(`hub (api only): ${hubUrl}`);
 
   let attached = false;
-  if (useSession) {
+
+  if (preferExtension) {
+    console.error(
+      `browser: waiting for Chrome extension (load unpacked once from):\n  ${extensionDir()}`
+    );
+    console.error(
+      "  Then open Chrome normally (shortcut), open any AI site, click extension → Use this tab."
+    );
+    const st = await waitForExtension({ timeoutMs: Number(opts.extWaitMs || 12000) });
+    if (st.connected || st.lastHello) {
+      console.error("browser: Chrome extension connected — driving your normal tabs (any site)");
+      await browser.browserConnect({ mode: "extension" });
+      attached = true;
+    } else {
+      console.error(
+        "browser: extension not connected yet — install once: chrome://extensions → Load unpacked → extension/"
+      );
+    }
+  }
+
+  if (!attached && useSession) {
     const sess = await ensureChromeCdp({
       cdpUrl,
       port,
@@ -55,15 +93,12 @@ export async function runStack(opts = {}) {
           ? "https://chatgpt.com/"
           : site === "deepseek"
             ? "https://chat.deepseek.com/"
-            : "https://chatgpt.com/",
+            : null,
     });
     if (sess.ok) {
       console.error(
-        `browser: using Chrome session via CDP ${cdpUrl}` +
-          (sess.started ? " (started Chrome)" : " (already running)")
-      );
-      console.error(
-        "  If you see Cloudflare “Verify you are human”, click it once in that Chrome window."
+        `browser: CDP fallback ${cdpUrl}` +
+          (sess.started ? " (started Chrome)" : "")
       );
       await browser.browserConnect({
         browser: "chrome",
@@ -71,18 +106,14 @@ export async function runStack(opts = {}) {
         cdpUrl,
       });
       attached = true;
-    } else {
-      console.error(`browser: could not attach Chrome session (${sess.error}) — launch fallback`);
     }
   }
 
   if (!attached) {
-    // ChatGPT Cloudflare blocks headless / bundled Chromium — force headed system Chrome
     const forceHeaded = site === "chatgpt" || process.env.MAILNOTMILK_HEADED === "1";
     const launchHeadless = forceHeaded ? false : headless;
     console.error(
-      `browser: Playwright ${browserName === "firefox" ? "Firefox" : "Chrome"} ` +
-        `(${launchHeadless ? "headless" : "headed"}) — click Cloudflare if it appears`
+      `browser: Playwright fallback (${launchHeadless ? "headless" : "headed"})`
     );
     await browser.browserConnect({
       browser: browserName === "firefox" ? "firefox" : "chrome",
