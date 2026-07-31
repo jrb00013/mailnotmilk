@@ -370,6 +370,23 @@ export async function install(tools, opts = {}) {
     console.log(`  ✗ path shim: ${err.message}`);
   }
 
+  console.log("\nInstalling Chrome extension (auto — no Load unpacked)…");
+  try {
+    const { installChromeExtension, extensionInstallHint } = await import(
+      "./extension-install.js"
+    );
+    const info = installChromeExtension();
+    console.log(extensionInstallHint(info));
+  } catch (err) {
+    console.log(`  ✗ extension auto-install: ${err.message}`);
+    try {
+      const { extensionDir } = await import("./run-stack.js");
+      console.log(`  Fallback: chrome://extensions → Load unpacked → ${extensionDir()}`);
+    } catch {
+      /* ignore */
+    }
+  }
+
   console.log("\nDone. Restart your AI tool to pick up MCP + skills.");
   if (targets.includes("claude-code")) {
     console.log(
@@ -377,15 +394,7 @@ export async function install(tools, opts = {}) {
     );
     console.log("             then verify with:  claude mcp list");
   }
-  try {
-    const { extensionDir } = await import("./run-stack.js");
-    console.log("\nChrome extension (once — then normal Chrome shortcut, any AI site):");
-    console.log(`  chrome://extensions → Load unpacked → ${extensionDir()}`);
-    console.log("  Or: mailnotmilk extension");
-  } catch {
-    console.log("\nChrome extension: mailnotmilk extension");
-  }
-  console.log("Then: ./run.sh   (no --remote-debugging-port)");
+  console.log("Then: fully quit Chrome once → open normal shortcut → ./run.sh");
 }
 
 export const AVAILABLE_TOOLS = Object.keys(TOOL_INSTALLERS);

@@ -1,35 +1,29 @@
 ---
 name: browser-relay
 description: >-
-  Drive any browser AI tab via the mailnotmilk Chrome extension (normal Chrome
-  shortcut — no --remote-debugging-port). Works for ChatGPT, DeepSeek, Gemini, etc.
+  Drive any browser AI tab via the mailnotmilk Chrome extension. ./install.sh
+  auto-registers it — normal Chrome shortcut, no --remote-debugging-port.
 allowed-tools: CallMcpTool, Shell
 ---
 
 # browser-relay
 
-## Goal
+## Setup
 
-Stay in the coding-agent terminal. Messages go into **whatever AI site tab** the user has open in normal Chrome.
+`./install.sh` auto-installs the extension (External Extensions + desktop launcher).
+User fully quits Chrome once, then uses the normal shortcut.
 
-## Setup (once)
-
-```bash
-mailnotmilk extension
-```
-
-Load unpacked from that folder in `chrome://extensions`. Then use the normal Chrome shortcut forever.
+Re-run only: `mailnotmilk extension`
 
 ## Flow
 
-1. User opens Chrome normally + any AI site
-2. Extension → **Use this tab**
-3. `browser_connect` `{ "mode": "extension" }`
-4. `browser_open_ai` / `relay_tick` / `chat_say`
+1. Chrome open normally + any AI site
+2. `browser_connect` `{ "mode": "extension" }`
+3. `relay_tick` / `chat_say` / `browser_send_message`
 
 ## Rules
 
 - Never require `--remote-debugging-port`
+- Never ask for manual Load unpacked (install handles it)
 - Never ask the user to log in
-- Never open the hub UI unless asked
-- Works for **any** http(s) chat UI, not just ChatGPT
+- Works for any http(s) chat UI

@@ -8,9 +8,8 @@ Bridge **any browser AI** (ChatGPT, DeepSeek web, Gemini, Copilot, Claude.ai) wi
 
 **Linux / macOS / WSL**
 ```bash
-./install.sh              # install MCP + skills + browsers
-mailnotmilk extension     # print path — Load unpacked once in chrome://extensions
-./run.sh                  # normal Chrome shortcut + extension (any AI site)
+./install.sh              # MCP + skills + browsers + auto Chrome extension
+./run.sh                  # after one Chrome restart — any AI site
 ./run.sh --site deepseek --peer claude
 ```
 

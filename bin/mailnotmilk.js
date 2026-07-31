@@ -272,21 +272,20 @@ program
 
 program
   .command("extension")
-  .description("Print Chrome extension install path (Load unpacked — once)")
-  .action(async () => {
-    const { extensionDir } = await import("../src/run-stack.js");
-    const dir = extensionDir();
-    console.log(dir);
-    console.error(`
-Install once:
-  1. Open chrome://extensions
-  2. Enable Developer mode
-  3. Load unpacked → select:
-     ${dir}
-  4. Open Chrome with your normal shortcut (no flags)
-  5. Open any AI site → click mailnotmilk → Use this tab
-  6. Run: ./run.sh
-`);
+  .description("Auto-install Chrome extension (External Extensions + launcher)")
+  .option("--path-only", "Only print the unpacked path")
+  .action(async (opts) => {
+    if (opts.pathOnly) {
+      const { extensionDir } = await import("../src/run-stack.js");
+      console.log(extensionDir());
+      return;
+    }
+    const { installChromeExtension, extensionInstallHint } = await import(
+      "../src/extension-install.js"
+    );
+    const info = installChromeExtension();
+    console.log(JSON.stringify({ extensionId: info.extensionId, extDir: info.extDir, crxPath: info.crxPath }, null, 2));
+    console.error(extensionInstallHint(info));
   });
 
 program
