@@ -27,7 +27,7 @@ describe("bridge", () => {
     assert.equal(r.goal, "deepseek ↔ claude");
     assert.match(r.pasteForPeer, /join_chat/);
     assert.match(r.pasteForPeer, /Claude Code/);
-    assert.match(r.pasteForPeer, r.chat.id);
+    assert.match(r.pasteForPeer, new RegExp(r.chat.id));
     assert.equal(r.kickoff.from, "deepseek");
     assert.match(r.instructionsForHuman, /paste/i);
   });
