@@ -242,6 +242,41 @@ function isKnownSiteUrl(url) {
   return detectSiteFromUrl(url) !== null;
 }
 
+/** URL of whatever page we are currently driving, or null. */
+export async function currentUrl() {
+  if (_meta.mode === "extension") {
+    try {
+      const tabs = (await ext.extListTabs())?.tabs || [];
+      const mine = _meta.tabId
+        ? tabs.find((t) => t.id === _meta.tabId || t.tabId === _meta.tabId)
+        : null;
+      return (mine || tabs.find((t) => t.active) || null)?.url || null;
+    } catch {
+      return null;
+    }
+  }
+  return _page ? _page.url() : null;
+}
+
+/**
+ * Adopt whatever site the page is actually on.
+ *
+ * The relay used to trust its --site flag and navigate to match, which meant
+ * browsing to a different AI in the same tab silently kept the old site's
+ * selectors — and could yank the tab away from where you were. Detection is
+ * per-tick and follows the URL instead.
+ *
+ * @returns {Promise<{site: string|null, url: string|null, changed: boolean}>}
+ */
+export async function syncSiteFromUrl() {
+  const url = await currentUrl();
+  const detected = detectSiteFromUrl(url);
+  const before = _meta.site;
+  if (detected && detected !== before) _meta.site = detected;
+  // On an unrecognised page keep whatever we had; GENERIC still drives it.
+  return { site: _meta.site, url, changed: _meta.site !== before };
+}
+
 async function loadPlaywright() {
   if (_pw) return _pw;
   try {
@@ -317,11 +352,14 @@ export async function browserConnect({
     const launchOpts = {
       headless: Boolean(headless),
       viewport: { width: 1400, height: 900 },
-      args: ["--disable-blink-features=AutomationControlled"],
     };
     if (name === "firefox") {
+      // No Chromium switches here. Firefox treats an unrecognised argument as a
+      // URL, so passing --disable-blink-features=AutomationControlled made it
+      // open a tab to "http://automationcontrolled/" on every launch.
       _context = await pw.firefox.launchPersistentContext(userDataDir, launchOpts);
     } else {
+      launchOpts.args = ["--disable-blink-features=AutomationControlled"];
       // System Chrome — Cloudflare blocks Playwright's bundled Chromium hard
       try {
         _context = await pw.chromium.launchPersistentContext(userDataDir, {

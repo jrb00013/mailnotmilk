@@ -105,9 +105,17 @@ export async function relayTick({
       });
     }
     await browser.browserOpenAi({ site });
-  } else if (!status.site || status.site === "custom") {
-    await browser.browserOpenAi({ site });
   }
+
+  // Follow the tab rather than the --site flag: whatever AI you navigate to is
+  // the one we talk to. Only navigate when the current page is not a chat we
+  // recognise, so we never yank the tab away from where you already are.
+  const synced = await browser.syncSiteFromUrl();
+  if (!synced.site || synced.site === "custom") {
+    await browser.browserOpenAi({ site });
+    await browser.syncSiteFromUrl();
+  }
+  site = browser.browserStatus().site || site;
 
   let chat = chatId ? getChat(chatId) : null;
   let invite = null;

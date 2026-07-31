@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.4
+
+- **Fix: Firefox opened `http://automationcontrolled/` on every launch.** The Chromium-only `--disable-blink-features=AutomationControlled` switch was passed to both engines, and Firefox treats an unrecognised argument as a URL. Chromium keeps the flag; Firefox gets none.
+- **Site is now detected from the URL each tick instead of pinned by `--site`.** Navigate the tab to any supported AI and the relay follows it, using that site's selectors. It only navigates when the current page is not a chat it recognises, so it no longer yanks the tab away from where you are.
+- New `syncSiteFromUrl()` / `currentUrl()`; extension mode reads the live tab through `extListTabs`.
+
 ## 1.6.3
 
 - **Fix: streamed replies were forwarded mid-generation and silently truncated.** The relay posted the first extraction whose text differed from the previous turn — true the moment streaming starts. A 6.6k-char reply was arriving as 703 chars, cut mid-sentence, with nothing to indicate it was incomplete. Completion is now a state machine (`createTurnSettler`) requiring both text quiescence *and* the page reporting not-generating; quiescence alone fires on any pause between tokens.
