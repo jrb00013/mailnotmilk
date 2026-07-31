@@ -22,7 +22,7 @@ const priorityZ = z.enum(["low", "normal", "high", "urgent"]).optional();
 export function createServer() {
   const server = new McpServer({
     name: "mailnotmilk",
-    version: "1.3.0",
+    version: "1.4.0",
   });
 
   server.tool(
@@ -486,6 +486,128 @@ export function createServer() {
     async ({ limit }) => {
       const chats = await import("./chats.js");
       return textResult({ ok: true, chats: chats.listChats({ limit: limit || 50 }) });
+    }
+  );
+
+  server.tool(
+    "browser_connect",
+    "Connect Chrome or Firefox via Playwright (launch persistent profile, or CDP attach for Chrome).",
+    {
+      browser: z.enum(["chrome", "firefox"]).optional(),
+      mode: z.enum(["launch", "cdp"]).optional(),
+      cdp_url: z.string().optional().describe("For mode=cdp, e.g. http://127.0.0.1:9222"),
+      headless: z.boolean().optional(),
+    },
+    async ({ browser, mode, cdp_url, headless }) => {
+      const b = await import("./browser.js");
+      const status = await b.browserConnect({
+        browser: browser || "chrome",
+        mode: mode || "launch",
+        cdpUrl: cdp_url || "http://127.0.0.1:9222",
+        headless: Boolean(headless),
+      });
+      return textResult({ ok: true, status });
+    }
+  );
+
+  server.tool(
+    "browser_open_ai",
+    "Navigate the connected browser to ChatGPT, DeepSeek, Claude, Gemini, Copilot, or a custom URL.",
+    {
+      site: z
+        .enum(["chatgpt", "deepseek", "claude", "gemini", "copilot"])
+        .optional(),
+      url: z.string().optional(),
+    },
+    async ({ site, url }) => {
+      const b = await import("./browser.js");
+      const status = await b.browserOpenAi({ site: site || "deepseek", url: url || null });
+      return textResult({ ok: true, status });
+    }
+  );
+
+  server.tool(
+    "browser_extract_messages",
+    "Parse visible chat turns from the open browser AI page.",
+    { limit: z.number().int().min(1).max(100).optional() },
+    async ({ limit }) => {
+      const b = await import("./browser.js");
+      return textResult({ ok: true, ...(await b.browserExtractMessages({ limit: limit || 40 })) });
+    }
+  );
+
+  server.tool(
+    "browser_send_message",
+    "Type a message into the browser AI composer and send it.",
+    {
+      text: z.string(),
+      submit: z.boolean().optional(),
+    },
+    async ({ text, submit }) => {
+      const b = await import("./browser.js");
+      return textResult({
+        ok: true,
+        ...(await b.browserSendMessage({ text, submit: submit !== false })),
+      });
+    }
+  );
+
+  server.tool(
+    "browser_screenshot",
+    "Screenshot the current browser page.",
+    { path: z.string().optional() },
+    async ({ path }) => {
+      const b = await import("./browser.js");
+      return textResult({ ok: true, ...(await b.browserScreenshot({ path: path || null })) });
+    }
+  );
+
+  server.tool(
+    "browser_disconnect",
+    "Close the Playwright browser session.",
+    {},
+    async () => {
+      const b = await import("./browser.js");
+      return textResult(await b.browserDisconnect());
+    }
+  );
+
+  server.tool(
+    "browser_status",
+    "Show whether a browser session is connected and which site is open.",
+    {},
+    async () => {
+      const b = await import("./browser.js");
+      return textResult({ ok: true, status: b.browserStatus(), sites: b.listSites() });
+    }
+  );
+
+  server.tool(
+    "relay_tick",
+    "One relay cycle: extract browser AI messages → mailnotmilk chat → optional wait for coding-agent reply → send back to browser.",
+    {
+      site: z.enum(["chatgpt", "deepseek", "claude", "gemini", "copilot"]).optional(),
+      peer: z.string().optional().describe("Coding agent id (default claude)"),
+      chat_id: z.string().optional(),
+      wait_peer_ms: z.number().int().min(0).max(120_000).optional(),
+      title: z.string().optional(),
+    },
+    async ({ site, peer, chat_id, wait_peer_ms, title }) => {
+      const { relayTick } = await import("./relay.js");
+      const result = await relayTick({
+        site: site || "deepseek",
+        peer: peer || "claude",
+        chatId: chat_id || null,
+        waitPeerMs: wait_peer_ms || 0,
+        title: title || null,
+      });
+      return textResult({
+        ok: true,
+        ...result,
+        human_action: result.invite?.pasteForPeer
+          ? "If peer has not joined yet, paste invite.pasteForPeer / pasteForPeer into Claude Code / Cursor / OpenCode."
+          : undefined,
+      });
     }
   );
 

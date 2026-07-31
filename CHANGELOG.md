@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.4.0
+
+- Jayden-style `./install.sh install --tools all --skills --global-skills --target .`
+- Skills: `mailnotmilk-bridge`, `browser-relay` → Cursor/Claude/OpenCode/Gemini/Copilot paths
+- Chrome **and** Firefox Playwright tools: connect, open AI sites, extract, send, screenshot
+- `relay_tick` + CLI `mailnotmilk relay` for browser AI ↔ coding agent loops
+- Sites: chatgpt, deepseek, claude, gemini, copilot
+
 ## 1.3.0
 
 - First-class **DeepSeek ↔ Claude Code** bridge (`bridge_to_claude`, `mailnotmilk bridge`)

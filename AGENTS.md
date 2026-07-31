@@ -1,13 +1,16 @@
 # mailnotmilk
 
-Prefer **DeepSeek ↔ Claude Code bridge** over raw send.
+Skills: **mailnotmilk-bridge**, **browser-relay** (installed via `./install.sh`).
 
-## When the user wants Claude Code involved
+## Browser AI (GPT / DeepSeek web / …) ↔ Claude / Cursor / OpenCode
 
-1. Call `bridge_to_claude` with a title + first message
-2. Show the user `pasteForPeer` — they paste it into Claude Code
-3. Continue with `chat_say` / `chat_history` / `check_inbox`
+1. `browser_connect` (chrome or firefox)
+2. `browser_open_ai` + `browser_extract_messages`
+3. `relay_tick` (forwards into mailnotmilk chat; paste `pasteForPeer` into coding agent if needed)
+4. Peer replies with `chat_say`; relay types back into the browser
 
-Never claim that mail auto-opens Claude. The paste is the bridge.
+Or CLI: `mailnotmilk relay --site deepseek --peer claude --browser firefox`
 
-See `docs/deepseek-claude.md`.
+## Cursor DeepSeek model → Claude Code
+
+`bridge_to_claude` → show `pasteForPeer` to the human.

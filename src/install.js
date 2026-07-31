@@ -1,4 +1,10 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import {
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+} from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
@@ -6,6 +12,7 @@ import { execSync } from "node:child_process";
 
 const HOME = homedir();
 const PKG_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const SKILLS_DIR = join(PKG_ROOT, "skills");
 
 function which(cmd) {
   try {
@@ -16,6 +23,11 @@ function which(cmd) {
 }
 
 function resolveServerCmd() {
+  // Prefer local checkout CLI when installing from a clone (jayden-style).
+  const localCli = join(PKG_ROOT, "bin", "mailnotmilk.js");
+  if (existsSync(localCli)) {
+    return { command: process.execPath, args: [localCli, "serve"] };
+  }
   if (which("mailnotmilk")) {
     return { command: "mailnotmilk", args: ["serve"] };
   }
@@ -62,20 +74,101 @@ const MCP_ENTRY = { command, args };
 
 const MAILBOX_RULES = `## mailnotmilk
 
-MCP server available: \`mailnotmilk\`
-- \`whoami\` — detected agent id
-- \`register_agent\` — join the roster
-- \`post_message\` — DM or room broadcast
-- \`check_inbox\` — unread mail (optional wait_ms)
-- \`read_message\` — ack a message
-- \`reply_message\` — threaded reply
-- \`list_agents\` / \`set_status\` / \`get_status\` — presence
+MCP server: \`mailnotmilk\` — bridge browser AIs (ChatGPT/DeepSeek/…) with Claude Code, Cursor, OpenCode.
 
-When collaborating across Cursor and Claude Code (or other agents):
-1. \`register_agent\` / \`whoami\` at session start
-2. \`check_inbox\` before and after substantive work
-3. \`post_message\` or \`reply_message\` with handoffs and results
-Do not wait for the human to say "check your mail" every time.`;
+Prefer:
+- \`bridge_to_claude\` / \`create_chat\` (paste invite — does not auto-open apps)
+- \`browser_connect\` / \`browser_extract_messages\` / \`browser_send_message\` / \`relay_tick\`
+- \`chat_say\` / \`chat_history\` / \`check_inbox\`
+
+See skill \`mailnotmilk-bridge\` and \`browser-relay\`.`;
+
+/** Jayden-style skill destination templates (project-relative). */
+export const SKILL_PATHS = {
+  cursor: ".cursor/skills/{name}/SKILL.md",
+  claude: ".claude/skills/{name}/SKILL.md",
+  "claude-code": ".claude/skills/{name}/SKILL.md",
+  copilot: ".github/skills/{name}/SKILL.md",
+  "github-copilot": ".github/skills/{name}/SKILL.md",
+  gemini: ".gemini/skills/{name}/SKILL.md",
+  opencode: ".opencode/skills/{name}/SKILL.md",
+};
+
+export function discoverSkills() {
+  if (!existsSync(SKILLS_DIR)) return [];
+  return readdirSync(SKILLS_DIR)
+    .filter((f) => f.endsWith(".md"))
+    .map((f) => ({
+      name: f.replace(/\.md$/, ""),
+      path: join(SKILLS_DIR, f),
+      body: readFileSync(join(SKILLS_DIR, f), "utf8"),
+    }));
+}
+
+function hasFrontmatter(text) {
+  const normalized = text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
+  if (!normalized.startsWith("---\n")) return false;
+  const end = normalized.indexOf("\n---", 4);
+  return end !== -1 && /^name:\s*\S/m.test(normalized.slice(4, end));
+}
+
+export function installSkillsForTarget(target, providers, { force = true } = {}) {
+  const skills = discoverSkills();
+  const root = resolve(target || process.cwd());
+  for (const provider of providers) {
+    const tpl = SKILL_PATHS[provider];
+    if (!tpl) continue;
+    for (const skill of skills) {
+      if (provider === "claude" || provider === "claude-code") {
+        if (!hasFrontmatter(skill.body)) {
+          console.log(`  ~ skip ${skill.name} for ${provider} (needs YAML name frontmatter)`);
+          continue;
+        }
+      }
+      const dest = join(root, tpl.replace("{name}", skill.name));
+      writeText(dest, skill.body);
+    }
+  }
+}
+
+export function installSkillsGlobal() {
+  const skills = discoverSkills();
+  for (const skill of skills) {
+    writeText(
+      join(HOME, ".cursor", "skills", skill.name, "SKILL.md"),
+      skill.body
+    );
+    if (hasFrontmatter(skill.body)) {
+      writeText(
+        join(HOME, ".claude", "skills", skill.name, "SKILL.md"),
+        skill.body
+      );
+    }
+    writeText(
+      join(HOME, ".opencode", "skills", skill.name, "SKILL.md"),
+      skill.body
+    );
+    writeText(
+      join(HOME, ".gemini", "skills", skill.name, "SKILL.md"),
+      skill.body
+    );
+  }
+}
+
+function mcpIntoProject(target) {
+  const root = resolve(target);
+  writeJson(join(root, ".cursor", "mcp.json"), {
+    mcpServers: {
+      mailnotmilk: {
+        ...MCP_ENTRY,
+        env: { MAILNOTMILK_AGENT_ID: process.env.MAILNOTMILK_AGENT_ID || "deepseek" },
+      },
+    },
+  });
+  writeJson(join(root, ".mcp.json"), {
+    mcpServers: { mailnotmilk: MCP_ENTRY },
+  });
+}
 
 const TOOL_INSTALLERS = {
   "claude-code": () => {
@@ -87,34 +180,28 @@ const TOOL_INSTALLERS = {
 
     const cmdDir = join(HOME, ".claude", "commands");
     mkdirSync(cmdDir, { recursive: true });
-    const cmdPath = join(cmdDir, "mailbox.md");
-    if (!existsSync(cmdPath)) {
-      writeText(
-        cmdPath,
-        `# mailbox
+    writeText(
+      join(cmdDir, "mailbox.md"),
+      `# mailbox
 
-Check and send shared agent mail via mailnotmilk.
+mailnotmilk bridge / inbox.
 
 ## Usage
-\`/mailbox\` — check inbox
-\`/mailbox send <agent> <text>\` — DM another agent
+\`/mailbox\` — check inbox / chat_history
+\`/mailbox bridge\` — ask to bridge_to_claude or relay_tick
 
 ## Steps
-1. Call \`whoami\` if unsure of your id
-2. Call \`check_inbox\` (optionally wait_ms=2000)
-3. \`read_message\` then \`reply_message\` as needed
-4. Use \`post_message\` for new handoffs
+1. join_chat or bridge_to_claude as needed
+2. chat_say / check_inbox
+3. For browser AI tabs: browser_* + relay_tick
 `
-      );
-    }
+    );
   },
 
   cursor: () => {
     const configPath = join(HOME, ".cursor", "mcp.json");
     const config = readJson(configPath);
     config.mcpServers = config.mcpServers || {};
-    // Default Cursor identity to deepseek so DeepSeek chats bridge cleanly to Claude Code.
-    // Override with MAILNOTMILK_AGENT_ID in the env block if you use another model name.
     config.mcpServers.mailnotmilk = {
       ...MCP_ENTRY,
       env: {
@@ -122,23 +209,7 @@ Check and send shared agent mail via mailnotmilk.
       },
     };
     writeJson(configPath, config);
-
-    writeJson(join(PKG_ROOT, ".cursor", "mcp.json"), {
-      mcpServers: {
-        mailnotmilk: {
-          ...MCP_ENTRY,
-          env: { MAILNOTMILK_AGENT_ID: "deepseek" },
-        },
-      },
-    });
-    writeJson(join(PKG_ROOT, ".mcp.json"), {
-      mcpServers: {
-        mailnotmilk: {
-          ...MCP_ENTRY,
-          env: { MAILNOTMILK_AGENT_ID: "deepseek" },
-        },
-      },
-    });
+    mcpIntoProject(PKG_ROOT);
   },
 
   windsurf: () => {
@@ -185,18 +256,13 @@ Check and send shared agent mail via mailnotmilk.
   cline: () => {
     const rulesDir = join(HOME, ".clinerules");
     mkdirSync(rulesDir, { recursive: true });
-    const rulePath = join(rulesDir, "mailnotmilk.md");
-    if (!existsSync(rulePath)) {
-      writeText(rulePath, `# mailnotmilk\n\n${MAILBOX_RULES}\n`);
-    } else {
-      console.log(`  ~ ${rulePath} (already configured)`);
-    }
+    writeText(join(rulesDir, "mailnotmilk.md"), `# mailnotmilk\n\n${MAILBOX_RULES}\n`);
   },
 
   aider: () => {
     appendUnique(
       join(HOME, ".aider.conf.yml"),
-      `# mailnotmilk: shared agent mailbox MCP — run 'mailnotmilk serve' from an MCP-capable editor`,
+      `# mailnotmilk MCP — browser AI ↔ coding agents`,
       "mailnotmilk"
     );
   },
@@ -210,7 +276,17 @@ Check and send shared agent mail via mailnotmilk.
   },
 };
 
-export async function install(tools) {
+/**
+ * @param {string|string[]} tools
+ * @param {object} [opts]
+ */
+export async function install(tools, opts = {}) {
+  const {
+    target = null,
+    skills = false,
+    globalSkills = false,
+  } = opts;
+
   const all = Object.keys(TOOL_INSTALLERS);
   const targets =
     tools === "all" ? all : Array.isArray(tools) ? tools : [tools];
@@ -221,7 +297,7 @@ export async function install(tools) {
       console.log(`  ? Unknown tool: ${tool} (available: ${all.join(", ")})`);
       continue;
     }
-    console.log(`\nInstalling for ${tool}...`);
+    console.log(`\nInstalling MCP for ${tool}...`);
     try {
       await installer();
     } catch (err) {
@@ -229,7 +305,24 @@ export async function install(tools) {
     }
   }
 
-  console.log("\nDone. Restart your AI tool to pick up the new MCP server.");
+  const skillProviders = targets
+    .map((t) => (t === "claude-code" ? "claude" : t === "github-copilot" ? "copilot" : t))
+    .filter((t) => SKILL_PATHS[t]);
+
+  if (skills || target) {
+    const root = target || process.cwd();
+    console.log(`\nInstalling skills into ${resolve(root)}...`);
+    installSkillsForTarget(root, skillProviders.length ? skillProviders : ["cursor", "claude", "opencode", "gemini", "copilot"]);
+    mcpIntoProject(root);
+  }
+
+  if (globalSkills || skills) {
+    console.log("\nInstalling user-level skills (~/.cursor, ~/.claude, …)...");
+    installSkillsGlobal();
+  }
+
+  console.log("\nDone. Restart your AI tool to pick up MCP + skills.");
+  console.log("Browser relay needs: npm i playwright && npx playwright install chromium firefox");
 }
 
 export const AVAILABLE_TOOLS = Object.keys(TOOL_INSTALLERS);

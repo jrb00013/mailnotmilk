@@ -2,46 +2,62 @@
 
 [![ci](https://github.com/jrb00013/mailnotmilk/actions/workflows/ci.yml/badge.svg)](https://github.com/jrb00013/mailnotmilk/actions/workflows/ci.yml)
 
-**Talk to DeepSeek in Cursor → bridge that conversation to Claude Code.**
+Bridge **any browser AI** (ChatGPT, DeepSeek web, Gemini, Copilot, Claude.ai) with **Claude Code / Cursor / OpenCode** — MCP mailbox + Chrome/Firefox automation + Jayden-style skills install.
 
-## Your actual goal
-
-```
-You ←→ DeepSeek (Cursor)
-              ↓  paste invite into Claude Code once
-         Claude Code
-              ↕  keep chatting via mailnotmilk
-         DeepSeek
-```
-
-Nothing auto-opens Claude. The product is a **paste block** Claude understands (`join_chat` + `chat_say`).
-
-## Setup once
+## Install (Jayden-style)
 
 ```bash
-npm install -g mailnotmilk   # or run from this repo
-mailnotmilk install --tool cursor      # sets MAILNOTMILK_AGENT_ID=deepseek
-mailnotmilk install --tool claude-code
-mailnotmilk hub                        # http://127.0.0.1:7879
+git clone https://github.com/jrb00013/mailnotmilk.git
+cd mailnotmilk
+./install.sh install --tools all --skills --global-skills --target .
+# same as:
+# mailnotmilk install --tools all --skills --global-skills --target .
 ```
 
-Restart Cursor and Claude Code.
+This writes:
 
-## Every time
+| Provider | MCP | Skills |
+|----------|-----|--------|
+| Cursor | `~/.cursor/mcp.json` + project `.cursor/mcp.json` | `.cursor/skills/*/SKILL.md` |
+| Claude Code | `~/.claude/settings.json` | `.claude/skills/*/SKILL.md` |
+| OpenCode | `~/.config/opencode/opencode.json` | `.opencode/skills/*/SKILL.md` |
+| Gemini / Copilot | settings / instructions | matching skill dirs |
+
+Browser automation:
 
 ```bash
-mailnotmilk bridge -t "fix auth" -m "Review src/auth.js with me" --open
+npm i
+npx playwright install chromium firefox
 ```
 
-Copy the printed **PASTE INTO CLAUDE CODE** block into Claude Code. Then both agents talk in that chat.
+## Browser AI ↔ coding agent
 
-In DeepSeek chat you can also say: *“bridge me to Claude Code about X”* → it should call MCP `bridge_to_claude` and show you `pasteForPeer`.
+```bash
+mailnotmilk hub &
+mailnotmilk relay --site deepseek --peer claude --browser chrome --wait 20000
+# or firefox: --browser firefox
+```
 
-Full walkthrough: [docs/deepseek-claude.md](docs/deepseek-claude.md)
+Flow:
 
-## Why not `send --to claude`?
+1. Playwright opens DeepSeek/ChatGPT/… (Chrome or Firefox)
+2. Extracts chat turns from the page
+3. Forwards into a mailnotmilk chat for Claude/Cursor/OpenCode
+4. When the coding agent replies, types it back into the browser composer
 
-That only writes SQLite. Claude will not wake up. Use `bridge` / `bridge_to_claude`.
+MCP tools: `browser_connect`, `browser_open_ai`, `browser_extract_messages`, `browser_send_message`, `relay_tick`, plus the chat/bridge tools.
+
+Skills installed: `mailnotmilk-bridge`, `browser-relay`.
+
+## DeepSeek-in-Cursor → Claude Code (paste)
+
+Still works when the “browser” is Cursor itself:
+
+```bash
+mailnotmilk bridge -t "fix auth" -m "help me" --open
+```
+
+Paste the block into Claude Code.
 
 ## License
 

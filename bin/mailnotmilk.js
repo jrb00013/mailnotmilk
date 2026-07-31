@@ -23,18 +23,32 @@ program
 
 program
   .command("install")
-  .description("Auto-configure AI tools to use this MCP server")
+  .description("Auto-configure AI tools + skills (jayden-style)")
   .option("--all", "Install for all supported tools")
   .option("--tool <tool>", "Install for a specific tool")
+  .option("--tools <list>", "Comma list or 'all' (jayden-compatible)")
+  .option("--target <dir>", "Project root for skills + .mcp.json (default cwd)")
+  .option("--skills", "Install skills into --target providers")
+  .option("--global-skills", "Install skills into ~/.cursor ~/.claude ~/.opencode …")
   .option("--hooks", "Also install turn-hook helpers")
   .action(async (opts) => {
     const { install, AVAILABLE_TOOLS } = await import("../src/install.js");
-    if (!opts.all && !opts.tool) {
+    let tools = null;
+    if (opts.all || opts.tools === "all") tools = "all";
+    else if (opts.tools) tools = opts.tools.split(",").map((s) => s.trim());
+    else if (opts.tool) tools = opts.tool;
+    else if (opts.skills || opts.globalSkills || opts.target) tools = "all";
+    else {
       console.log("Supported tools:", AVAILABLE_TOOLS.join(", "));
-      console.log("Use --all to install for all, or --tool <name> for one.");
+      console.log("Example: ./install.sh install --tools all --skills --global-skills");
+      console.log("Or: mailnotmilk install --all --skills");
       process.exit(1);
     }
-    await install(opts.all ? "all" : opts.tool);
+    await install(tools, {
+      target: opts.target || null,
+      skills: Boolean(opts.skills || opts.target),
+      globalSkills: Boolean(opts.globalSkills),
+    });
     if (opts.hooks) {
       const turn = await import("../src/turn.js");
       console.log(turn.installCursorHooks(process.cwd()));
@@ -240,6 +254,59 @@ program
       console.error(`\nHub: ${result.invite.joinUrl}`);
     }
     if (opts.open) await openUrl(result.invite.joinUrl);
+  });
+
+program
+  .command("relay")
+  .description("Relay browser AI chat (Chrome/Firefox) ↔ coding agent via mailnotmilk")
+  .option("--site <site>", "chatgpt|deepseek|claude|gemini|copilot", "deepseek")
+  .option("--browser <b>", "chrome|firefox", "chrome")
+  .option("--peer <id>", "Coding agent id", "claude")
+  .option("--chat <id>", "Existing chat id")
+  .option("--wait <ms>", "Wait for peer reply", "15000")
+  .option("--headless", "Launch browser headless")
+  .option("--loop", "Keep ticking")
+  .option("--interval <ms>", "Loop interval", "8000")
+  .action(async (opts) => {
+    const browser = await import("../src/browser.js");
+    const { relayTick } = await import("../src/relay.js");
+    await browser.browserConnect({
+      browser: opts.browser === "firefox" ? "firefox" : "chrome",
+      mode: "launch",
+      headless: Boolean(opts.headless),
+    });
+    await browser.browserOpenAi({ site: opts.site });
+    const run = async () => {
+      const result = await relayTick({
+        chatId: opts.chat || null,
+        site: opts.site,
+        peer: opts.peer,
+        waitPeerMs: Number(opts.wait),
+        sendPeerReplyToBrowser: true,
+      });
+      console.log(JSON.stringify(result, null, 2));
+      return result;
+    };
+    let last = await run();
+    if (!opts.loop) {
+      await browser.browserDisconnect();
+      return;
+    }
+    const chatId = last.chat?.id;
+    console.error(`relay loop chat=${chatId} ctrl-c to stop`);
+    const ac = new AbortController();
+    process.on("SIGINT", () => ac.abort());
+    while (!ac.signal.aborted) {
+      await new Promise((r) => setTimeout(r, Number(opts.interval)));
+      last = await relayTick({
+        chatId,
+        site: opts.site,
+        peer: opts.peer,
+        waitPeerMs: Number(opts.wait),
+      });
+      console.log(JSON.stringify({ tick: Date.now(), ...last.extracted, peerReply: last.peerReply?.id }, null, 2));
+    }
+    await browser.browserDisconnect();
   });
 
 program

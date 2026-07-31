@@ -1,0 +1,328 @@
+/**
+ * Chrome / Firefox automation for web AI chats (ChatGPT, DeepSeek, …).
+ * Uses Playwright when available; fails with install hint otherwise.
+ */
+
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { dataDir, ensureDataDir } from "./paths.js";
+
+let _pw = null;
+let _browser = null;
+let _context = null;
+let _page = null;
+let _meta = { browser: null, site: null, cdp: false };
+
+const SITES = {
+  chatgpt: {
+    url: "https://chatgpt.com/",
+    // Fragile DOM — multiple fallbacks
+    messageSelectors: [
+      '[data-message-author-role]',
+      'article[data-testid^="conversation-turn"]',
+      ".agent-turn",
+      "[class*='markdown']",
+    ],
+    roleAttr: "data-message-author-role",
+    composerSelectors: [
+      "#prompt-textarea",
+      "textarea[data-id='root']",
+      "div[contenteditable='true']#prompt-textarea",
+      "form textarea",
+    ],
+    sendSelectors: [
+      'button[data-testid="send-button"]',
+      'button[aria-label="Send prompt"]',
+      'button[aria-label="Send"]',
+    ],
+  },
+  deepseek: {
+    url: "https://chat.deepseek.com/",
+    messageSelectors: [
+      ".ds-message",
+      "[class*='message']",
+      ".chat-message",
+      "div[data-message-id]",
+    ],
+    composerSelectors: [
+      "textarea",
+      "div[contenteditable='true']",
+      "#chat-input",
+    ],
+    sendSelectors: [
+      'button[aria-label*="Send"]',
+      'div[role="button"][aria-label*="Send"]',
+      "button:has(svg)",
+    ],
+  },
+  claude: {
+    url: "https://claude.ai/new",
+    messageSelectors: [
+      "[data-test-render-count]",
+      ".font-claude-message",
+      "[class*='Message']",
+    ],
+    composerSelectors: [
+      "div[contenteditable='true']",
+      "fieldset textarea",
+      "p[data-placeholder]",
+    ],
+    sendSelectors: [
+      'button[aria-label="Send Message"]',
+      'button[aria-label="Send message"]',
+    ],
+  },
+  gemini: {
+    url: "https://gemini.google.com/app",
+    messageSelectors: [
+      "message-content",
+      ".model-response-text",
+      "[data-message-id]",
+    ],
+    composerSelectors: [
+      "rich-textarea div[contenteditable='true']",
+      "div[contenteditable='true']",
+    ],
+    sendSelectors: [
+      'button[aria-label="Send message"]',
+      'button.send-button',
+    ],
+  },
+  copilot: {
+    url: "https://copilot.microsoft.com/",
+    messageSelectors: [
+      "[data-content='ai-message']",
+      "[data-content='user-message']",
+      ".group\\/ai-message-item",
+    ],
+    composerSelectors: [
+      "#userInput",
+      "textarea#userInput",
+      "textarea[placeholder]",
+    ],
+    sendSelectors: [
+      'button[aria-label="Submit"]',
+      'button[type="submit"]',
+    ],
+  },
+};
+
+export function listSites() {
+  return Object.keys(SITES);
+}
+
+async function loadPlaywright() {
+  if (_pw) return _pw;
+  try {
+    _pw = await import("playwright");
+    return _pw;
+  } catch {
+    const err = new Error(
+      "Playwright not installed. Run: npm install playwright && npx playwright install chromium firefox"
+    );
+    err.code = "PLAYWRIGHT_MISSING";
+    throw err;
+  }
+}
+
+export function browserStatus() {
+  return {
+    connected: Boolean(_page),
+    browser: _meta.browser,
+    site: _meta.site,
+    cdp: _meta.cdp,
+    url: _page ? _page.url() : null,
+  };
+}
+
+export async function browserConnect({
+  browser = "chrome",
+  mode = "launch",
+  cdpUrl = "http://127.0.0.1:9222",
+  headless = false,
+  profileDir = null,
+} = {}) {
+  await browserDisconnect();
+  const pw = await loadPlaywright();
+  const name = browser === "firefox" ? "firefox" : "chromium";
+  _meta = { browser: name, site: null, cdp: mode === "cdp" };
+
+  if (mode === "cdp") {
+    if (name !== "chromium") {
+      throw new Error("CDP attach is Chromium/Chrome only; use mode=launch for Firefox");
+    }
+    _browser = await pw.chromium.connectOverCDP(cdpUrl);
+    const contexts = _browser.contexts();
+    _context = contexts[0] || (await _browser.newContext());
+    const pages = _context.pages();
+    _page = pages[0] || (await _context.newPage());
+  } else {
+    ensureDataDir();
+    const userDataDir =
+      profileDir ||
+      join(dataDir(), "browser-profiles", name);
+    mkdirSync(userDataDir, { recursive: true });
+    const launcher = name === "firefox" ? pw.firefox : pw.chromium;
+    _context = await launcher.launchPersistentContext(userDataDir, {
+      headless: Boolean(headless),
+      viewport: { width: 1400, height: 900 },
+      args: name === "chromium" ? ["--disable-blink-features=AutomationControlled"] : [],
+    });
+    _browser = _context.browser();
+    _page = _context.pages()[0] || (await _context.newPage());
+  }
+
+  return browserStatus();
+}
+
+export async function browserDisconnect() {
+  try {
+    if (_context && _meta.cdp === false) await _context.close();
+    else if (_browser) await _browser.close();
+  } catch {
+    /* ignore */
+  }
+  _pw = _pw;
+  _browser = null;
+  _context = null;
+  _page = null;
+  _meta = { browser: null, site: null, cdp: false };
+  return { ok: true };
+}
+
+function requirePage() {
+  if (!_page) throw new Error("Not connected — call browser_connect first");
+  return _page;
+}
+
+export async function browserOpenAi({ site = "deepseek", url = null } = {}) {
+  const page = requirePage();
+  let target = url;
+  let siteKey = site;
+  if (!target) {
+    const cfg = SITES[site];
+    if (!cfg) throw new Error(`Unknown site ${site}. Known: ${listSites().join(", ")}`);
+    target = cfg.url;
+    siteKey = site;
+  } else {
+    siteKey = site || "custom";
+  }
+  await page.goto(target, { waitUntil: "domcontentloaded", timeout: 60_000 });
+  await sleep(1500);
+  _meta.site = siteKey;
+  return { ...browserStatus(), title: await page.title() };
+}
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function firstSelector(page, selectors) {
+  for (const sel of selectors) {
+    const loc = page.locator(sel).first();
+    if ((await loc.count()) > 0) return loc;
+  }
+  return null;
+}
+
+export async function browserExtractMessages({ limit = 40 } = {}) {
+  const page = requirePage();
+  const site = _meta.site && SITES[_meta.site] ? SITES[_meta.site] : null;
+  const selectors = site?.messageSelectors || [
+    "[data-message-author-role]",
+    ".ds-message",
+    "article",
+    "[class*='message']",
+  ];
+
+  const messages = await page.evaluate(
+    ({ selectors, roleAttr, limit }) => {
+      const out = [];
+      const seen = new Set();
+      for (const sel of selectors) {
+        const nodes = Array.from(document.querySelectorAll(sel));
+        for (const el of nodes) {
+          const text = (el.innerText || el.textContent || "").trim();
+          if (!text || text.length < 2) continue;
+          const key = text.slice(0, 120);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          let role = el.getAttribute(roleAttr || "data-message-author-role");
+          if (!role) {
+            const cls = (el.className || "").toString().toLowerCase();
+            if (cls.includes("user") || cls.includes("human")) role = "user";
+            else if (cls.includes("assistant") || cls.includes("model") || cls.includes("ai"))
+              role = "assistant";
+            else role = "unknown";
+          }
+          out.push({ role, text: text.slice(0, 8000) });
+        }
+        if (out.length) break;
+      }
+      return out.slice(-limit);
+    },
+    {
+      selectors,
+      roleAttr: site?.roleAttr || "data-message-author-role",
+      limit: Math.min(Math.max(Number(limit) || 40, 1), 100),
+    }
+  );
+
+  return {
+    site: _meta.site,
+    url: page.url(),
+    count: messages.length,
+    messages,
+    lastAssistant: [...messages].reverse().find((m) => m.role === "assistant") || null,
+    lastUser: [...messages].reverse().find((m) => m.role === "user") || null,
+  };
+}
+
+export async function browserSendMessage({ text, submit = true } = {}) {
+  if (!text) throw new Error("text required");
+  const page = requirePage();
+  const site = _meta.site && SITES[_meta.site] ? SITES[_meta.site] : null;
+  const composers = site?.composerSelectors || [
+    "textarea",
+    "div[contenteditable='true']",
+  ];
+  const composer = await firstSelector(page, composers);
+  if (!composer) throw new Error("Could not find chat composer on page");
+
+  await composer.click({ timeout: 10_000 });
+  const handle = await composer.elementHandle();
+  const tag = await handle.evaluate((el) => el.tagName.toLowerCase());
+  if (tag === "textarea" || tag === "input") {
+    await composer.fill(text);
+  } else {
+    await page.keyboard.insertText(text);
+  }
+
+  if (submit) {
+    const senders = site?.sendSelectors || ['button[aria-label*="Send"]', 'button[type="submit"]'];
+    const sendBtn = await firstSelector(page, senders);
+    if (sendBtn) {
+      await sendBtn.click({ timeout: 5000 }).catch(async () => {
+        await page.keyboard.press("Enter");
+      });
+    } else {
+      await page.keyboard.press("Enter");
+    }
+    await sleep(1200);
+  }
+
+  return { ok: true, site: _meta.site, url: page.url() };
+}
+
+export async function browserScreenshot({ path = null } = {}) {
+  const page = requirePage();
+  ensureDataDir();
+  const out =
+    path ||
+    join(dataDir(), "captures", `browser-${Date.now()}.png`);
+  mkdirSync(join(dataDir(), "captures"), { recursive: true });
+  await page.screenshot({ path: out, fullPage: false });
+  return { path: out, url: page.url() };
+}
+
+export { SITES };
