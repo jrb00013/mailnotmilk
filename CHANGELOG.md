@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.0
+
+- **Chat sessions** with invite tokens and shareable join links
+- Local **HTTP hub** (`mailnotmilk hub`) — live thread UI + copy peer prompt
+- MCP: `create_chat`, `join_chat`, `chat_link`, `chat_say`, `chat_history`, `list_chats`
+- CLI: `chat new|link|join|say|log|ls|open`
+- Explicit docs: raw `send` does **not** pop open Claude/Cursor
+
 ## 1.1.0
 
 - Structured `post_handoff` / CLI `handoff`

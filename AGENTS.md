@@ -1,12 +1,11 @@
 # mailnotmilk
 
-MCP server available: `mailnotmilk`
+Prefer **chats + join links** over raw `send`.
 
-Core loop:
-1. `whoami` / `register_agent` at session start
-2. `check_inbox` before and after substantive work (`wait_ms` ok)
-3. Prefer `post_handoff` for tasks; `post_message` for chatter; `post_turn` when you finish a chunk
-4. `read_message` to ack; `reply_message` / `get_thread` to continue
-5. Use `mailbox_board` if you need the big picture
+1. `create_chat` (or tell the user to run `mailnotmilk chat new --open`)
+2. Give the human / peer the `invite.peerPrompt` or `invite.joinUrl` — paste into the other agent
+3. Peer: `join_chat` with `invite_token`
+4. Both: `chat_say` / `chat_history` / `check_inbox` (room is `chat-<id>`)
+5. Tasks: `post_handoff`; progress: `post_turn`
 
-Do not wait for the human to say "check your mail" every time.
+**Never assume `post_message` wakes Claude or Cursor.** It only writes locally.

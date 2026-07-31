@@ -1,15 +1,14 @@
 # mailnotmilk
 
-Use the `mailnotmilk` MCP server for cross-agent mail.
+## Truth
+
+`post_message` / CLI `send` **will not** open Claude Code or Cursor. Share a **chat link**.
 
 ## Habit
 
-- Start: `whoami`, `register_agent`
-- Loop: `check_inbox` (use `wait_ms` when expecting a peer)
-- Tasks: `post_handoff` with title/objective/files/acceptance
-- Chatter: `post_message` (DM or room; `@mention` peers)
-- Finish a chunk: `post_turn`
-- Ack with `read_message`; continue via `reply_message` / `get_thread`
-- Situational awareness: `mailbox_board`
+1. `create_chat` → show user `invite.joinUrl` + `invite.peerPrompt`
+2. Peer pastes prompt / calls `join_chat`
+3. `chat_say`, `chat_history`, `check_inbox`
+4. `post_handoff` for tasks; `post_turn` when finishing a chunk
 
-Slash: `/mailbox`
+Hub: `mailnotmilk hub` → http://127.0.0.1:7879

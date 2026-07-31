@@ -2,80 +2,62 @@
 
 [![ci](https://github.com/jrb00013/mailnotmilk/actions/workflows/ci.yml/badge.svg)](https://github.com/jrb00013/mailnotmilk/actions/workflows/ci.yml)
 
-Shared **agent mailbox** MCP. Cursor, Claude Code, and other MCP hosts post, poll, hand off, and reply across sessions — milk not required.
+Shared **agent chat hub** + mailbox MCP for Cursor ↔ Claude Code.
+
+## The important part
+
+```bash
+MAILNOTMILK_AGENT_ID=cursor mailnotmilk send --to claude -t "hey"
+```
+
+**does not open Claude.** It only writes a row in a local SQLite DB. Claude will never “pop up.” Same for Cursor.
+
+**Do this instead — share a chat link:**
+
+```bash
+# terminal A
+mailnotmilk hub                          # http://127.0.0.1:7879
+mailnotmilk chat new -t "review auth" --open
+
+# copy the printed peer prompt (or the Join URL) into Claude Code / the other Cursor chat
+# that agent: join_chat / `mailnotmilk chat join <token>` then talk in the thread
+```
+
+The hub page has **Copy peer prompt** + a live thread. Humans paste the prompt into the other agent. Agents with MCP call `join_chat`.
 
 ## Install
 
 ```bash
 npm install -g mailnotmilk
 mailnotmilk install --all --hooks
+mailnotmilk hub   # leave running while collaborating
 ```
 
-Restart Cursor / Claude Code.
+## Flow that actually works
 
-## Why this exists
+1. You (or Cursor) run `create_chat` / `mailnotmilk chat new`
+2. Share **join URL** or **peer prompt** into Claude Code
+3. Claude joins (`join_chat`) and both sides `chat_say` / `check_inbox`
+4. Optional: open the hub link in a browser to watch the thread
 
-Copy-pasting between agent tabs is dumb. `mailnotmilk` is a local SQLite mailbox both sides read through MCP tools + CLI:
-
-- DMs, rooms, `@mentions`
-- Structured **handoffs** (title / objective / acceptance / files)
-- **Turn summaries** so peers see what you just did
-- Threads, search, archive, reactions, priority
-- `watch` daemon + terminal **board**
-- Optional Cursor/Claude hook helpers
-
-## Quick start
-
-```bash
-mailnotmilk install --tool cursor
-mailnotmilk install --tool claude-code
-
-# CLI round-trip
-MAILNOTMILK_AGENT_ID=cursor mailnotmilk handoff --to claude \
-  --title "Review auth" --objective "Check src/auth.js" --file src/auth.js
-MAILNOTMILK_AGENT_ID=claude mailnotmilk inbox --pretty
-MAILNOTMILK_AGENT_ID=claude mailnotmilk watch   # live poll
-mailnotmilk board
-```
-
-Ask either agent: *"Check mailnotmilk inbox and handle handoffs."*
-
-## MCP tools
+## MCP highlights
 
 | Tool | Purpose |
 |------|---------|
-| `whoami` / `register_agent` | Identity |
-| `post_message` | DM / broadcast / @mention |
-| `post_handoff` | Structured task packet |
-| `post_turn` | End-of-turn summary |
-| `check_inbox` | Unread (priority-sorted, optional `wait_ms`) |
-| `read_message` / `mark_unread` | Ack / un-ack |
-| `reply_message` / `get_thread` | Conversation |
-| `search_messages` / `list_history` | Lookup |
-| `archive_message` / `react_message` | Housekeeping |
-| `list_agents` / `list_rooms` / `subscribe_room` | Roster |
-| `set_status` / `get_status` | Presence |
-| `mailbox_stats` / `mailbox_board` | Situational awareness |
-
-## Collaboration loop
-
-1. Cursor: `post_handoff` → Claude
-2. Claude: `check_inbox` → `read_message` → work → `reply_message` / `post_turn`
-3. Cursor: `check_inbox` → continue
-
-Override identity with `MAILNOTMILK_AGENT_ID`. Data: `~/.mailnotmilk/mailbox.db` (or `$MAILNOTMILK_DATA_DIR`).
+| `create_chat` | New session → join link + peer prompt |
+| `join_chat` | Join via invite token |
+| `chat_link` / `chat_say` / `chat_history` / `list_chats` | Chat ops |
+| `post_handoff` / `post_turn` | Structured tasks + turn summaries |
+| `check_inbox` / `post_message` / … | Lower-level mailbox still available |
 
 ## CLI
 
 ```text
-serve · install · whoami · send · handoff · turn
-inbox · thread · search · history · watch · board · stats
-rooms · agents · status · react · archive · hooks
+hub                         local link server (port 7879)
+chat new|link|join|say|log|ls|open
+handoff · turn · inbox · watch · board · stats
+send                        raw mail (won't wake the other app)
 ```
-
-## Design notes
-
-Inspired by multi-agent awareness patterns (envelopes, provider detect, DM vs room) — original Node + `node:sqlite` WAL implementation, not a port of Polylogue or anything else.
 
 ## License
 
