@@ -5,3 +5,7 @@ export * as store from "./store.js";
 export { createServer, startServer } from "./server.js";
 export { install, AVAILABLE_TOOLS } from "./install.js";
 export { formatInboxLines } from "./format.js";
+export { renderBoard } from "./board.js";
+export { watchInbox } from "./watch.js";
+export { postTurn, installCursorHooks, installClaudeStopHint } from "./turn.js";
+export { buildHandoffMarkdown, parseHandoffMeta } from "./handoff.js";
