@@ -1,9 +1,61 @@
 {
   "name": "mailnotmilk",
-  "version": "0.0.1",
-  "description": "Shared agent mailbox MCP",
+  "version": "1.0.0",
+  "description": "Shared agent mailbox MCP — Cursor, Claude Code, and friends post/read/reply across sessions.",
+  "keywords": [
+    "mcp",
+    "mailbox",
+    "agent",
+    "claude",
+    "cursor",
+    "inter-agent",
+    "model-context-protocol"
+  ],
+  "homepage": "https://github.com/jrb00013/mailnotmilk#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jrb00013/mailnotmilk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jrb00013/mailnotmilk/issues"
+  },
   "license": "MIT",
+  "author": "Joseph Black <jrb00013wvu@gmail.com>",
   "type": "module",
-  "bin": { "mailnotmilk": "bin/mailnotmilk.js" },
-  "engines": { "node": ">=22.5" }
+  "bin": {
+    "mailnotmilk": "bin/mailnotmilk.js"
+  },
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./server": "./src/server.js",
+    "./store": "./src/store.js"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "docs/",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "GEMINI.md",
+    "SECURITY.md"
+  ],
+  "scripts": {
+    "start": "node bin/mailnotmilk.js serve",
+    "install-tools": "node bin/mailnotmilk.js install --all",
+    "test": "node --test tests/*.test.js",
+    "lint": "node --check src/*.js bin/*.js",
+    "prepublishOnly": "node --check bin/mailnotmilk.js && node --check src/server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "commander": "^12.0.0",
+    "zod": "^3.23.0"
+  },
+  "engines": {
+    "node": ">=22.5"
+  }
 }
