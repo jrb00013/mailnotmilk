@@ -131,10 +131,19 @@ export async function runStack(opts = {}) {
     return result;
   };
 
-  await tick();
+  const first = await tick();
+  if (!browser.browserStatus().cdp) {
+    console.error(
+      "\n⚠  Not attached to your real Chrome tab (cdp=false) — extracted messages may be empty.\n" +
+        "   Quit Chrome completely, then start:\n" +
+        "     google-chrome --remote-debugging-port=9222\n" +
+        "   Open https://chatgpt.com (stay logged in), then:\n" +
+        "     ./run.sh\n"
+    );
+  }
   if (!loop) {
     await browser.browserDisconnect();
-    return { hubUrl, chatId };
+    return { hubUrl, chatId, first };
   }
 
   console.error(`relay loop running (every ${intervalMs}ms). ctrl-c to stop.`);

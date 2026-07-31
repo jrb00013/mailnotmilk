@@ -144,8 +144,9 @@ export function ensurePlaywrightBrowsers({ withDeps = null } = {}) {
 
   const wantDeps =
     withDeps === null
-      ? plat.isLinux // linux-native + wsl
+      ? false // default OFF — broken apt PPAs (common) make install-deps fail loudly
       : Boolean(withDeps);
+
 
   if (wantDeps) {
     console.log("  → playwright install-deps (Linux/WSL system libraries, best-effort)…");

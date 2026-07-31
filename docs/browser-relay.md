@@ -5,12 +5,17 @@ Use Playwright (Chrome **or** Firefox) to read/write web AI chats and relay thro
 ## Prerequisites
 
 ```bash
-./install.sh          # Linux/macOS/WSL — installs MCP, skills, AND Playwright browsers
-install.cmd           # Windows native
-# or: mailnotmilk install --browsers-only
+./install.sh --run     # install everything, then hub + ChatGPT↔Claude relay
+# or later:
+./run.sh               # hub + relay (CDP if Chrome on :9222)
+./run.sh --site chatgpt --peer claude
 ```
 
-No separate `npx playwright install` step — install does it for your platform.
+Start Chrome once with debugging for your existing ChatGPT tab:
+
+```bash
+google-chrome --remote-debugging-port=9222
+```
 
 ## One-shot relay
 

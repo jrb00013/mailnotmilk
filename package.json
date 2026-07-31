@@ -1,6 +1,6 @@
 {
   "name": "mailnotmilk",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "description": "Bridge browser AIs with Claude Code/Cursor/OpenCode — ./install.sh --run and ./run.sh start hub+relay.",
   "keywords": [
     "mcp",

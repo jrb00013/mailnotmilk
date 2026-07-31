@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { utcNowIso } from "./envelope.js";
 import { sanitizeId } from "./identity.js";
 import { getDb, registerAgent, postMessage, listHistory } from "./store.js";
+import { cliInvocation } from "./path-shim.js";
 
 function shortId(bytes = 6) {
   return randomBytes(bytes).toString("base64url");
@@ -177,6 +178,9 @@ export function buildInviteBundle(chat, { hubBase, from = null, peer = null } = 
   const joinUrl = `${base.replace(/\/$/, "")}/c/${chat.id}?invite=${chat.inviteToken}`;
   const deep = `mailnotmilk://join/${chat.inviteToken}`;
 
+  // Absolute local CLI — works even when `mailnotmilk` is not on PATH
+  const cli = cliInvocation();
+
   const generic = [
     `Join this mailnotmilk chat and collaborate with me.`,
     ``,
@@ -184,8 +188,8 @@ export function buildInviteBundle(chat, { hubBase, from = null, peer = null } = 
     `Link: ${joinUrl}`,
     ``,
     `If you have mailnotmilk MCP: call join_chat with invite_token "${chat.inviteToken}", then chat_history / chat_say on chat_id "${chat.id}".`,
-    `CLI: mailnotmilk chat join ${chat.inviteToken}`,
-    `Then: mailnotmilk chat say ${chat.id} -t "your reply"`,
+    `CLI: ${cli} chat join ${chat.inviteToken}`,
+    `Then: ${cli} chat say ${chat.id} -t "your reply"`,
   ].join("\n");
 
   let claudePrompt = generic;
@@ -207,8 +211,8 @@ export function buildInviteBundle(chat, { hubBase, from = null, peer = null } = 
       `Hub: ${joinUrl}`,
       ``,
       `CLI fallback:`,
-      `  mailnotmilk chat join ${chat.inviteToken} --agent claude`,
-      `  mailnotmilk chat say ${chat.id} -t "hello" --from claude`,
+      `  ${cli} chat join ${chat.inviteToken} --agent claude`,
+      `  ${cli} chat say ${chat.id} -t "hello" --from claude`,
     ].join("\n");
     peerPrompt = claudePrompt;
   }

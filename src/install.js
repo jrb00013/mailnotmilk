@@ -336,13 +336,25 @@ export async function install(tools, opts = {}) {
     } catch (err) {
       console.log(`  ✗ browser runtime: ${err.message}`);
       console.log(
-        "  You can retry: mailnotmilk install --browsers-only"
+        "  You can retry: mailnotmilk install --browsers-only --skip-deps"
       );
     }
   }
 
+  console.log("\nInstalling PATH shim (mailnotmilk command)…");
+  try {
+    const { installPathShim } = await import("./path-shim.js");
+    installPathShim();
+  } catch (err) {
+    console.log(`  ✗ path shim: ${err.message}`);
+  }
+
   console.log("\nDone. Restart your AI tool to pick up MCP + skills.");
-  console.log("Relay is ready when Playwright browsers installed successfully above.");
+  console.log("Run hub+relay:  ./run.sh");
+  console.log("Or:            ./install.sh --run");
+  console.log(
+    "ChatGPT tab: start Chrome with --remote-debugging-port=9222 then ./run.sh"
+  );
 }
 
 export const AVAILABLE_TOOLS = Object.keys(TOOL_INSTALLERS);

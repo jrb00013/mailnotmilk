@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.5.2
+
+- Default **skip** `playwright install-deps` (broken apt PPAs no longer look like hard failures)
+- Install writes `~/.local/bin/mailnotmilk` shim so `mailnotmilk` works after PATH refresh
+- Hub always started via `node …/bin/mailnotmilk.js` (never bare PATH lookup)
+- Clearer warning when relay is not CDP-attached to your real ChatGPT Chrome tab
+
 ## 1.5.1
 
 - `./install.sh --run` installs then starts hub + relay

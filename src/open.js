@@ -31,21 +31,32 @@ function probe(port) {
   });
 }
 
-/** Start hub in background if not already up; return base URL. */
+/** Start hub in background if not already up; return base URL. Never uses bare `mailnotmilk` on PATH. */
 export async function ensureHub(port = 7879) {
   const base = `http://127.0.0.1:${port}`;
-  if (await probe(port)) return base;
+  if (await probe(port)) {
+    console.error(`hub already up: ${base}`);
+    return base;
+  }
 
+  console.error(`starting hub: ${process.execPath} ${CLI} hub -p ${port}`);
   const child = spawn(process.execPath, [CLI, "hub", "-p", String(port)], {
     stdio: "ignore",
     detached: true,
     env: process.env,
+    cwd: fileURLToPath(new URL("..", import.meta.url)),
   });
   child.unref();
 
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < 80; i++) {
     await new Promise((r) => setTimeout(r, 100));
-    if (await probe(port)) return base;
+    if (await probe(port)) {
+      console.error(`hub: ${base}`);
+      return base;
+    }
   }
-  throw new Error(`Could not start hub on ${base}`);
+  throw new Error(
+    `Could not start hub on ${base}. Try: ${process.execPath} ${CLI} hub`
+  );
 }
+
