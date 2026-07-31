@@ -2,62 +2,46 @@
 
 [![ci](https://github.com/jrb00013/mailnotmilk/actions/workflows/ci.yml/badge.svg)](https://github.com/jrb00013/mailnotmilk/actions/workflows/ci.yml)
 
-Shared **agent chat hub** + mailbox MCP for Cursor ↔ Claude Code.
+**Talk to DeepSeek in Cursor → bridge that conversation to Claude Code.**
 
-## The important part
+## Your actual goal
+
+```
+You ←→ DeepSeek (Cursor)
+              ↓  paste invite into Claude Code once
+         Claude Code
+              ↕  keep chatting via mailnotmilk
+         DeepSeek
+```
+
+Nothing auto-opens Claude. The product is a **paste block** Claude understands (`join_chat` + `chat_say`).
+
+## Setup once
 
 ```bash
-MAILNOTMILK_AGENT_ID=cursor mailnotmilk send --to claude -t "hey"
+npm install -g mailnotmilk   # or run from this repo
+mailnotmilk install --tool cursor      # sets MAILNOTMILK_AGENT_ID=deepseek
+mailnotmilk install --tool claude-code
+mailnotmilk hub                        # http://127.0.0.1:7879
 ```
 
-**does not open Claude.** It only writes a row in a local SQLite DB. Claude will never “pop up.” Same for Cursor.
+Restart Cursor and Claude Code.
 
-**Do this instead — share a chat link:**
+## Every time
 
 ```bash
-# terminal A
-mailnotmilk hub                          # http://127.0.0.1:7879
-mailnotmilk chat new -t "review auth" --open
-
-# copy the printed peer prompt (or the Join URL) into Claude Code / the other Cursor chat
-# that agent: join_chat / `mailnotmilk chat join <token>` then talk in the thread
+mailnotmilk bridge -t "fix auth" -m "Review src/auth.js with me" --open
 ```
 
-The hub page has **Copy peer prompt** + a live thread. Humans paste the prompt into the other agent. Agents with MCP call `join_chat`.
+Copy the printed **PASTE INTO CLAUDE CODE** block into Claude Code. Then both agents talk in that chat.
 
-## Install
+In DeepSeek chat you can also say: *“bridge me to Claude Code about X”* → it should call MCP `bridge_to_claude` and show you `pasteForPeer`.
 
-```bash
-npm install -g mailnotmilk
-mailnotmilk install --all --hooks
-mailnotmilk hub   # leave running while collaborating
-```
+Full walkthrough: [docs/deepseek-claude.md](docs/deepseek-claude.md)
 
-## Flow that actually works
+## Why not `send --to claude`?
 
-1. You (or Cursor) run `create_chat` / `mailnotmilk chat new`
-2. Share **join URL** or **peer prompt** into Claude Code
-3. Claude joins (`join_chat`) and both sides `chat_say` / `check_inbox`
-4. Optional: open the hub link in a browser to watch the thread
-
-## MCP highlights
-
-| Tool | Purpose |
-|------|---------|
-| `create_chat` | New session → join link + peer prompt |
-| `join_chat` | Join via invite token |
-| `chat_link` / `chat_say` / `chat_history` / `list_chats` | Chat ops |
-| `post_handoff` / `post_turn` | Structured tasks + turn summaries |
-| `check_inbox` / `post_message` / … | Lower-level mailbox still available |
-
-## CLI
-
-```text
-hub                         local link server (port 7879)
-chat new|link|join|say|log|ls|open
-handoff · turn · inbox · watch · board · stats
-send                        raw mail (won't wake the other app)
-```
+That only writes SQLite. Claude will not wake up. Use `bridge` / `bridge_to_claude`.
 
 ## License
 

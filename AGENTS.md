@@ -1,11 +1,13 @@
 # mailnotmilk
 
-Prefer **chats + join links** over raw `send`.
+Prefer **DeepSeek ↔ Claude Code bridge** over raw send.
 
-1. `create_chat` (or tell the user to run `mailnotmilk chat new --open`)
-2. Give the human / peer the `invite.peerPrompt` or `invite.joinUrl` — paste into the other agent
-3. Peer: `join_chat` with `invite_token`
-4. Both: `chat_say` / `chat_history` / `check_inbox` (room is `chat-<id>`)
-5. Tasks: `post_handoff`; progress: `post_turn`
+## When the user wants Claude Code involved
 
-**Never assume `post_message` wakes Claude or Cursor.** It only writes locally.
+1. Call `bridge_to_claude` with a title + first message
+2. Show the user `pasteForPeer` — they paste it into Claude Code
+3. Continue with `chat_say` / `chat_history` / `check_inbox`
+
+Never claim that mail auto-opens Claude. The paste is the bridge.
+
+See `docs/deepseek-claude.md`.

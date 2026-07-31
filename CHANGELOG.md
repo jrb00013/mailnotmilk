@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.0
+
+- First-class **DeepSeek ↔ Claude Code** bridge (`bridge_to_claude`, `mailnotmilk bridge`)
+- Claude-specific paste prompts (`pasteForPeer` / `claudePrompt`)
+- Cursor install defaults `MAILNOTMILK_AGENT_ID=deepseek`
+- Docs: [docs/deepseek-claude.md](docs/deepseek-claude.md)
+
 ## 1.2.0
 
 - **Chat sessions** with invite tokens and shareable join links

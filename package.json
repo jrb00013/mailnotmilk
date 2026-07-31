@@ -1,7 +1,7 @@
 {
   "name": "mailnotmilk",
-  "version": "1.2.0",
-  "description": "Shared agent chat hub + mailbox MCP — share a join link between Cursor and Claude Code (mail alone will not pop the other app).",
+  "version": "1.3.0",
+  "description": "Bridge DeepSeek in Cursor to Claude Code via shareable chat paste prompts + local hub.",
   "keywords": [
     "mcp",
     "mailbox",

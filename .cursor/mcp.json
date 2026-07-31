@@ -6,7 +6,10 @@
         "-y",
         "mailnotmilk",
         "serve"
-      ]
+      ],
+      "env": {
+        "MAILNOTMILK_AGENT_ID": "deepseek"
+      }
     }
   }
 }

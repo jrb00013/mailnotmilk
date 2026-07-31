@@ -205,6 +205,44 @@ program
   });
 
 program
+  .command("bridge")
+  .description(
+    "DeepSeek (Cursor) ↔ Claude Code: create chat and print paste block for Claude"
+  )
+  .option("-t, --title <title>", "Chat title", "DeepSeek ↔ Claude Code")
+  .option("-m, --message <text>", "First message from DeepSeek")
+  .option("-f, --from <id>", "Your id", "deepseek")
+  .option("--peer <id>", "Peer id", "claude")
+  .option("--open", "Open hub chat page")
+  .option("--json", "Print full JSON instead of paste-only")
+  .action(async (opts) => {
+    const { openBridge } = await import("../src/bridge.js");
+    const { ensureHub, openUrl } = await import("../src/open.js");
+    let hubBase = null;
+    try {
+      hubBase = await ensureHub(7879);
+    } catch {
+      hubBase = "http://127.0.0.1:7879";
+    }
+    const result = openBridge({
+      title: opts.title,
+      from: opts.from,
+      peer: opts.peer,
+      firstMessage: opts.message || null,
+      hubBase,
+    });
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.error(result.instructionsForHuman);
+      console.error("\n—— PASTE INTO CLAUDE CODE ——\n");
+      console.log(result.pasteForPeer);
+      console.error(`\nHub: ${result.invite.joinUrl}`);
+    }
+    if (opts.open) await openUrl(result.invite.joinUrl);
+  });
+
+program
   .command("handoff")
   .description("Post a structured handoff")
   .requiredOption("--to <id>", "Target agent")

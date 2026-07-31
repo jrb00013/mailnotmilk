@@ -12,3 +12,4 @@ export { buildHandoffMarkdown, parseHandoffMeta } from "./handoff.js";
 export * as chats from "./chats.js";
 export { startHub, createHubServer } from "./hub.js";
 export { openUrl, ensureHub } from "./open.js";
+export { openBridge, peerPastePrompt, defaultBridgeFrom } from "./bridge.js";

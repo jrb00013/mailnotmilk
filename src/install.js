@@ -113,14 +113,31 @@ Check and send shared agent mail via mailnotmilk.
     const configPath = join(HOME, ".cursor", "mcp.json");
     const config = readJson(configPath);
     config.mcpServers = config.mcpServers || {};
-    config.mcpServers.mailnotmilk = MCP_ENTRY;
+    // Default Cursor identity to deepseek so DeepSeek chats bridge cleanly to Claude Code.
+    // Override with MAILNOTMILK_AGENT_ID in the env block if you use another model name.
+    config.mcpServers.mailnotmilk = {
+      ...MCP_ENTRY,
+      env: {
+        MAILNOTMILK_AGENT_ID: process.env.MAILNOTMILK_AGENT_ID || "deepseek",
+      },
+    };
     writeJson(configPath, config);
 
     writeJson(join(PKG_ROOT, ".cursor", "mcp.json"), {
-      mcpServers: { mailnotmilk: MCP_ENTRY },
+      mcpServers: {
+        mailnotmilk: {
+          ...MCP_ENTRY,
+          env: { MAILNOTMILK_AGENT_ID: "deepseek" },
+        },
+      },
     });
     writeJson(join(PKG_ROOT, ".mcp.json"), {
-      mcpServers: { mailnotmilk: MCP_ENTRY },
+      mcpServers: {
+        mailnotmilk: {
+          ...MCP_ENTRY,
+          env: { MAILNOTMILK_AGENT_ID: "deepseek" },
+        },
+      },
     });
   },
 

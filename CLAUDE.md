@@ -1,14 +1,11 @@
 # mailnotmilk
 
-## Truth
+## DeepSeek → Claude Code
 
-`post_message` / CLI `send` **will not** open Claude Code or Cursor. Share a **chat link**.
+When the user wants you to talk to Claude Code:
 
-## Habit
+1. `bridge_to_claude` (title + message)
+2. Display `pasteForPeer` so the user can paste it into Claude Code
+3. Keep collaborating via `chat_say` / `chat_history`
 
-1. `create_chat` → show user `invite.joinUrl` + `invite.peerPrompt`
-2. Peer pastes prompt / calls `join_chat`
-3. `chat_say`, `chat_history`, `check_inbox`
-4. `post_handoff` for tasks; `post_turn` when finishing a chunk
-
-Hub: `mailnotmilk hub` → http://127.0.0.1:7879
+Do **not** use raw `post_message`/`send` and expect Claude to wake up.

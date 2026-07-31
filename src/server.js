@@ -22,7 +22,7 @@ const priorityZ = z.enum(["low", "normal", "high", "urgent"]).optional();
 export function createServer() {
   const server = new McpServer({
     name: "mailnotmilk",
-    version: "1.2.0",
+    version: "1.3.0",
   });
 
   server.tool(
@@ -359,16 +359,55 @@ export function createServer() {
       title: z.string().describe("Short chat title"),
       created_by: z.string().optional(),
       members: z.array(z.string()).optional(),
+      peer: z
+        .string()
+        .optional()
+        .describe("Who will receive the paste prompt (default claude)"),
     },
-    async ({ title, created_by, members }) => {
+    async ({ title, created_by, members, peer }) => {
       const chats = await import("./chats.js");
+      const from = resolveAgentId(created_by);
       const chat = chats.createChat({
         title,
-        createdBy: resolveAgentId(created_by),
+        createdBy: from,
         members: members || [],
       });
-      const invite = chats.buildInviteBundle(chat);
+      const invite = chats.buildInviteBundle(chat, {
+        from,
+        peer: peer || "claude",
+      });
       return textResult({ ok: true, chat, invite });
+    }
+  );
+
+  server.tool(
+    "bridge_to_claude",
+    "DeepSeek/Cursor → Claude Code bridge. Creates a chat and returns pasteForPeer — the human pastes that into Claude Code. Nothing auto-opens Claude.",
+    {
+      title: z.string().optional().describe("Chat title"),
+      message: z
+        .string()
+        .optional()
+        .describe("First message from you (DeepSeek) into the chat"),
+      from: z
+        .string()
+        .optional()
+        .describe("Your id (default deepseek)"),
+    },
+    async ({ title, message, from }) => {
+      const { openBridge, defaultBridgeFrom } = await import("./bridge.js");
+      const result = openBridge({
+        title: title || "DeepSeek ↔ Claude Code",
+        from: from || defaultBridgeFrom(),
+        peer: "claude",
+        firstMessage: message || null,
+      });
+      return textResult({
+        ok: true,
+        ...result,
+        human_action:
+          "Show pasteForPeer to the user and tell them to paste it into Claude Code.",
+      });
     }
   );
 

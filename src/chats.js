@@ -169,26 +169,49 @@ export function postToChat({
  * Build shareable links + paste prompts.
  * Opening Claude does NOT auto-happen — the invite is what you paste.
  */
-export function buildInviteBundle(chat, { hubBase } = {}) {
+export function buildInviteBundle(chat, { hubBase, from = null, peer = null } = {}) {
   const base =
     hubBase ||
     process.env.MAILNOTMILK_HUB_URL ||
     `http://127.0.0.1:${process.env.MAILNOTMILK_HUB_PORT || 7879}`;
   const joinUrl = `${base.replace(/\/$/, "")}/c/${chat.id}?invite=${chat.inviteToken}`;
   const deep = `mailnotmilk://join/${chat.inviteToken}`;
-  const peerPrompt = [
+
+  const generic = [
     `Join this mailnotmilk chat and collaborate with me.`,
     ``,
     `Chat: ${chat.title} (${chat.id})`,
     `Link: ${joinUrl}`,
     ``,
-    `If you have mailnotmilk MCP: call join_chat with invite_token "${chat.inviteToken}", then check_inbox / post_message in room "${chat.room}".`,
+    `If you have mailnotmilk MCP: call join_chat with invite_token "${chat.inviteToken}", then chat_history / chat_say on chat_id "${chat.id}".`,
     `CLI: mailnotmilk chat join ${chat.inviteToken}`,
     `Then: mailnotmilk chat say ${chat.id} -t "your reply"`,
   ].join("\n");
 
-  const cursorPrompt = peerPrompt;
-  const claudePrompt = peerPrompt;
+  let claudePrompt = generic;
+  let cursorPrompt = generic;
+  let peerPrompt = generic;
+
+  if (peer === "claude" || peer === "claude-code" || !peer) {
+    const fromId = from || chat.createdBy || "deepseek";
+    claudePrompt = [
+      `You are Claude Code. Join a live collaboration chat with ${fromId}.`,
+      ``,
+      `Do this now:`,
+      `1. join_chat invite_token="${chat.inviteToken}" agent_id="claude"`,
+      `2. chat_history chat_id="${chat.id}"`,
+      `3. Reply with chat_say chat_id="${chat.id}"`,
+      `4. Keep using this chat (check_inbox / chat_history) while collaborating`,
+      ``,
+      `Title: ${chat.title}`,
+      `Hub: ${joinUrl}`,
+      ``,
+      `CLI fallback:`,
+      `  mailnotmilk chat join ${chat.inviteToken} --agent claude`,
+      `  mailnotmilk chat say ${chat.id} -t "hello" --from claude`,
+    ].join("\n");
+    peerPrompt = claudePrompt;
+  }
 
   return {
     chatId: chat.id,
@@ -201,7 +224,7 @@ export function buildInviteBundle(chat, { hubBase } = {}) {
     cursorPrompt,
     claudePrompt,
     note:
-      "Sending mail does not pop open Claude/Cursor. Share joinUrl or peerPrompt into the other agent chat.",
+      "This does not pop open Claude/Cursor. Paste peerPrompt / claudePrompt into the other agent.",
   };
 }
 

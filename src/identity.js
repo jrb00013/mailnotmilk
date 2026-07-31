@@ -9,6 +9,7 @@ export function detectProvider() {
     return sanitizeId(process.env.MAILNOTMILK_AGENT_ID);
   }
   if (process.env.CURSOR_AGENT === "1" || process.env.CURSOR_TRACE_ID) {
+    // Cursor host — model may be DeepSeek; prefer explicit AGENT_ID when set above.
     return "cursor";
   }
   for (const key of ["OPENCODE", "OPENCODE_SESSION", "OPENCODE_CONFIG"]) {
@@ -17,9 +18,16 @@ export function detectProvider() {
   if (process.env.CLAUDECODE || process.env.CLAUDE_CODE) {
     return "claude";
   }
+  if (
+    process.env.DEEPSEEK_API_KEY &&
+    (process.env.DEEPSEEK_AGENT || process.env.MAILNOTMILK_AS === "deepseek")
+  ) {
+    return "deepseek";
+  }
 
   const blob = processTreeBlob().toLowerCase();
   if (blob.includes("opencode")) return "opencode";
+  if (blob.includes("deepseek")) return "deepseek";
   if (
     blob.includes("cursor-agent") ||
     blob.includes("cursor agent") ||
