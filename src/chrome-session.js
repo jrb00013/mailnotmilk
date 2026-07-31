@@ -1,11 +1,13 @@
 /**
- * Attach to the user's Chrome (or start Chrome with CDP) — no login flow.
- * Login state is irrelevant; we drive whatever session/page is there.
+ * Attach to Chrome via CDP — no login flow.
+ * Uses a dedicated profile under ~/.mailnotmilk/chrome-cdp so CDP always comes up
+ * even when your daily Chrome is already open.
  */
 
 import { spawn, execSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { platform } from "node:os";
+import { existsSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { homedir, platform } from "node:os";
 import http from "node:http";
 
 function probe(url, timeoutMs = 400) {
@@ -70,15 +72,21 @@ function findChromeBin() {
   return null;
 }
 
+function cdpProfileDir() {
+  const dir = join(homedir(), ".mailnotmilk", "chrome-cdp");
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
 /**
- * Ensure a CDP endpoint is reachable. Never asks the user to log in.
- * If Chrome is already debugging → use it.
- * Else start system Chrome with --remote-debugging-port (fresh or existing process).
+ * Ensure a CDP endpoint is reachable.
+ * Starts a dedicated Chrome profile with remote debugging (does not fight your daily Chrome).
  */
 export async function ensureChromeCdp({
   cdpUrl = "http://127.0.0.1:9222",
   port = 9222,
   startIfMissing = true,
+  openUrl = "https://chatgpt.com/",
 } = {}) {
   if (await cdpUp(cdpUrl)) {
     return { ok: true, cdpUrl, started: false, bin: null };
@@ -92,16 +100,19 @@ export async function ensureChromeCdp({
     return { ok: false, cdpUrl, started: false, bin: null, error: "Chrome/Chromium binary not found" };
   }
 
-  // Do not touch the locked default profile if Chrome is already open —
-  // a second instance with remote debugging is enough; auth is optional.
+  const profile = cdpProfileDir();
   const args = [
     `--remote-debugging-port=${port}`,
+    `--user-data-dir=${profile}`,
     "--no-first-run",
     "--no-default-browser-check",
     "--disable-blink-features=AutomationControlled",
+    openUrl,
   ];
 
-  console.error(`browser: starting ${bin} (CDP :${port}) — no login required`);
+  console.error(
+    `browser: starting ${bin} (CDP :${port}, profile ${profile}) — if Cloudflare appears, click Verify once`
+  );
   const child = spawn(bin, args, {
     detached: true,
     stdio: "ignore",
@@ -109,10 +120,10 @@ export async function ensureChromeCdp({
   });
   child.unref();
 
-  for (let i = 0; i < 50; i++) {
-    await new Promise((r) => setTimeout(r, 200));
+  for (let i = 0; i < 80; i++) {
+    await new Promise((r) => setTimeout(r, 250));
     if (await cdpUp(cdpUrl)) {
-      return { ok: true, cdpUrl, started: true, bin };
+      return { ok: true, cdpUrl, started: true, bin, profile };
     }
   }
   return {
@@ -120,6 +131,7 @@ export async function ensureChromeCdp({
     cdpUrl,
     started: true,
     bin,
-    error: "Chrome started but CDP did not come up (another Chrome may own the profile)",
+    profile,
+    error: "Chrome started but CDP did not come up",
   };
 }

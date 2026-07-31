@@ -50,11 +50,20 @@ export async function runStack(opts = {}) {
       cdpUrl,
       port,
       startIfMissing: opts.startChrome !== false,
+      openUrl:
+        site === "chatgpt"
+          ? "https://chatgpt.com/"
+          : site === "deepseek"
+            ? "https://chat.deepseek.com/"
+            : "https://chatgpt.com/",
     });
     if (sess.ok) {
       console.error(
         `browser: using Chrome session via CDP ${cdpUrl}` +
           (sess.started ? " (started Chrome)" : " (already running)")
+      );
+      console.error(
+        "  If you see Cloudflare “Verify you are human”, click it once in that Chrome window."
       );
       await browser.browserConnect({
         browser: "chrome",
@@ -63,19 +72,22 @@ export async function runStack(opts = {}) {
       });
       attached = true;
     } else {
-      console.error(`browser: could not attach Chrome session (${sess.error}) — headless fallback`);
+      console.error(`browser: could not attach Chrome session (${sess.error}) — launch fallback`);
     }
   }
 
   if (!attached) {
+    // ChatGPT Cloudflare blocks headless / bundled Chromium — force headed system Chrome
+    const forceHeaded = site === "chatgpt" || process.env.MAILNOTMILK_HEADED === "1";
+    const launchHeadless = forceHeaded ? false : headless;
     console.error(
       `browser: Playwright ${browserName === "firefox" ? "Firefox" : "Chrome"} ` +
-        `(${headless ? "headless" : "headed"}) — no login; open site and send messages as-is`
+        `(${launchHeadless ? "headless" : "headed"}) — click Cloudflare if it appears`
     );
     await browser.browserConnect({
       browser: browserName === "firefox" ? "firefox" : "chrome",
       mode: "launch",
-      headless,
+      headless: launchHeadless,
     });
   }
 

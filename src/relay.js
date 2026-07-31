@@ -46,6 +46,19 @@ export async function relayTick({
   }
 
   const extracted = await browser.browserExtractMessages({ limit: 50 });
+  if (extracted.blocked === "cloudflare") {
+    return {
+      ok: false,
+      error: extracted.error,
+      chat,
+      invite,
+      extracted,
+      forwarded: null,
+      peerReply: null,
+      browserSend: null,
+      browser: browser.browserStatus(),
+    };
+  }
   const lastUser = extracted.lastUser;
   const lastAssistant = extracted.lastAssistant;
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.5
+
+- Detect Cloudflare challenge; wait for “Verify you are human” instead of silently extracting 0 messages
+- Use system Chrome (`channel: chrome`) + dedicated CDP profile `~/.mailnotmilk/chrome-cdp`
+- Stronger ChatGPT message selectors
+
 ## 1.5.4
 
 - Never ask the user to log in — auth is optional
