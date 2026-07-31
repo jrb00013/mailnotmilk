@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.1
+
+- Relay forwards ChatGPT **assistant** turns into the chat (was extracted then dropped)
+- Echo filter: do not re-post peer→browser injects as `## From browser (…) user`
+- After typing into the browser, wait for a new assistant reply and forward it
+
 ## 1.6.0
 
 - **Fix: Claude Code MCP install never took effect.** The server was written only to `~/.claude/settings.json`, which Claude Code does not read `mcpServers` from — so `join_chat`/`chat_say`/`check_inbox` never appeared in a session. Now writes `~/.claude.json` (the canonical user scope) as well.
