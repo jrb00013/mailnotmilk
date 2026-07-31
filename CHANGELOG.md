@@ -1,10 +1,14 @@
 # Changelog
 
-## Unreleased
+## 1.6.0
 
 - **Fix: Claude Code MCP install never took effect.** The server was written only to `~/.claude/settings.json`, which Claude Code does not read `mcpServers` from — so `join_chat`/`chat_say`/`check_inbox` never appeared in a session. Now writes `~/.claude.json` (the canonical user scope) as well.
 - Config edits are merge-not-clobber: a parse error aborts instead of silently resetting the file to `{}`, and every rewritten config gets a `.bak`. Previously a malformed `~/.claude.json` or a project `.mcp.json` holding other servers could be wiped.
 - Install output tells you how to verify: restart Claude Code, then `claude mcp list`.
+- Chrome extension bridge: drive **any** AI tab from a normal Chrome shortcut (no `--remote-debugging-port`)
+- Hub `/api/ext/*` long-poll command queue
+- `mailnotmilk extension` prints Load unpacked path
+- `./run.sh` prefers extension → CDP → Playwright
 
 ## 1.5.5
 
