@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.4
+
+- Never ask the user to log in — auth is optional
+- Default: attach/start the user's Chrome session via CDP (auto `--remote-debugging-port`)
+- Removed "sign in once with --headed" messaging from docs/skills/MCP
+
 ## 1.5.3
 
 - Default **headless** browser + **no hub UI** (`./run.sh` no longer pops windows)

@@ -1,52 +1,34 @@
 # Browser AI ↔ coding agents
 
-Intended UX: stay in Claude Code / Cursor / Codex / Gemini / OpenCode. Talk via mailnotmilk MCP tools. No ChatGPT window, no hub UI.
+Stay in Claude Code / Cursor / Codex / Gemini. Drive ChatGPT (etc.) through mailnotmilk MCP.
 
-Hub is a background HTTP API only. Playwright runs headless against a persistent profile (`~/.mailnotmilk/browser-profiles/`).
+**We never ask you to log in.** Auth is optional. Use whatever Chrome session/page is open.
 
-## Setup (once)
+## Setup
 
 ```bash
 ./install.sh
-# First login to ChatGPT (one-time visible window):
-./run.sh --headed --once
-# Sign in, then Ctrl-C. After that, headless works.
+./run.sh                 # attaches/starts Chrome with CDP; hub API stays background
 ```
 
 Restart your AI tool so MCP + skills load.
 
-## Day-to-day (in the agent terminal)
+## Day-to-day (agent terminal)
 
-Do **not** open browsers. Use MCP:
-
-1. `browser_connect` `{ "browser": "chrome" }` — headless by default  
-2. `browser_open_ai` `{ "site": "chatgpt" }`  
-3. `chat_say` / `relay_tick` — messages go into the ChatGPT composer; replies come back via `chat_history` / `check_inbox`  
-4. Keep polling the same `chat_id` while collaborating
-
-Optional background loop (still headless, no UI):
+1. `browser_connect` — attaches to your Chrome session (starts Chrome with debugging if needed)
+2. `browser_open_ai` `{ "site": "chatgpt" }` — only navigates if needed
+3. `chat_say` / `relay_tick` — types into the page composer; replies come back via MCP
+4. Poll `chat_history` / `check_inbox`
 
 ```bash
-./run.sh                    # headless + hub API only
-./run.sh --site deepseek --peer claude
-./run.sh --headed           # only if you need to see/login
-./run.sh --open             # only if you want the optional hub UI
+./run.sh                       # use Chrome session; no hub UI
+./run.sh --no-session          # Playwright only (still no login)
+./run.sh --open                # optional hub UI
 ```
-
-## CDP (optional)
-
-Only if you insist on driving your daily Chrome tab:
-
-```bash
-google-chrome --remote-debugging-port=9222
-./run.sh --cdp
-```
-
-You do **not** need this for the default headless path.
 
 ## Reality check
 
-- Web AI DOMs change — selectors are best-effort  
-- First login often needs `--headed` once (CAPTCHA / OAuth)  
-- This does not merge into ChatGPT’s own “session” as Claude’s internal context; it syncs messages through mailnotmilk into the browser composer and back into MCP  
-- Nothing auto-opens Claude Code; peers join via MCP `join_chat` or a pasted invite
+- Chrome must expose CDP for session attach — mailnotmilk starts Chrome with `--remote-debugging-port` when needed (you do not type the flag)
+- If your daily Chrome is already open *without* debugging, a second Chrome instance is started for the session (or quit Chrome first so it can reuse your profile)
+- Selectors are best-effort; web AI DOMs change
+- Does not merge into Claude’s internal context — syncs messages via MCP ↔ page composer

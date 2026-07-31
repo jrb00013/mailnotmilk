@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Background hub API + headless ChatGPT/DeepSeek relay (no browser/UI windows).
+# Hub API + browser relay using your Chrome session. No login. No hub UI.
 # Usage:
 #   ./run.sh
 #   ./run.sh --site chatgpt --peer claude
-#   ./run.sh --headed          # once, to log in
-#   ./run.sh --open            # optional hub UI
+#   ./run.sh --no-session     # Playwright only
+#   ./run.sh --open           # optional hub UI
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 

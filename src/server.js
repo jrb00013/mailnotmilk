@@ -491,7 +491,7 @@ export function createServer() {
 
   server.tool(
     "browser_connect",
-    "Connect Chrome/Firefox via Playwright. Default: headless launch with persistent profile (no visible window). Set headless=false once to log in; use mode=cdp only if Chrome was started with --remote-debugging-port.",
+    "Attach to the user's Chrome via CDP (preferred) or launch Playwright. Never asks the user to log in — auth is optional; drive whatever page/session is open.",
     {
       browser: z.enum(["chrome", "firefox"]).optional(),
       mode: z.enum(["launch", "cdp"]).optional(),
@@ -499,17 +499,24 @@ export function createServer() {
       headless: z
         .boolean()
         .optional()
-        .describe("Default true. Set false only for first-time site login."),
+        .describe("Only for mode=launch. Default true. Login not required either way."),
     },
     async ({ browser, mode, cdp_url, headless }) => {
       const b = await import("./browser.js");
+      let resolvedMode = mode || "launch";
+      let cdpUrl = cdp_url || "http://127.0.0.1:9222";
+      if (!mode && (browser || "chrome") !== "firefox") {
+        const { ensureChromeCdp } = await import("./chrome-session.js");
+        const sess = await ensureChromeCdp({ cdpUrl, startIfMissing: true });
+        if (sess.ok) resolvedMode = "cdp";
+      }
       const status = await b.browserConnect({
         browser: browser || "chrome",
-        mode: mode || "launch",
-        cdpUrl: cdp_url || "http://127.0.0.1:9222",
+        mode: resolvedMode,
+        cdpUrl,
         headless: headless === undefined ? true : Boolean(headless),
       });
-      return textResult({ ok: true, status });
+      return textResult({ ok: true, status, mode: resolvedMode });
     }
   );
 

@@ -238,7 +238,7 @@ program
 program
   .command("run")
   .description(
-    "Background hub API + headless browser relay (no UI windows by default)"
+    "Background hub API + browser relay. Uses your Chrome session when possible; never asks you to log in."
   )
   .option("--site <site>", "chatgpt|deepseek|claude|gemini|copilot", "chatgpt")
   .option("--browser <b>", "chrome|firefox", "chrome")
@@ -246,9 +246,9 @@ program
   .option("--wait <ms>", "Wait for peer reply each tick", "20000")
   .option("--interval <ms>", "Loop interval", "8000")
   .option("--once", "Single tick then exit (default is loop)")
-  .option("--headed", "Show the Playwright browser (default is headless)")
+  .option("--headed", "If falling back to Playwright launch, show the window")
   .option("--open", "Also open the hub UI in a browser tab (off by default)")
-  .option("--cdp", "Prefer attaching Chrome on --cdp-url if available")
+  .option("--no-session", "Skip Chrome CDP; force Playwright launch")
   .option("--cdp-url <url>", "Chrome CDP URL", "http://127.0.0.1:9222")
   .action(async (opts) => {
     const { runStack } = await import("../src/run-stack.js");
@@ -261,7 +261,7 @@ program
       loop: !opts.once,
       headless: !opts.headed,
       cdpUrl: opts.cdpUrl,
-      preferCdp: Boolean(opts.cdp),
+      useSession: opts.session !== false,
       openBrowser: Boolean(opts.open),
     });
   });
