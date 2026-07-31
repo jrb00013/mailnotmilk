@@ -52,7 +52,7 @@ program
 
 program
   .command("send")
-  .description("Post a message")
+  .description("Post raw mail (does NOT open Claude/Cursor — prefer: chat new)")
   .requiredOption("-t, --text <text>", "Message body")
   .option("-f, --from <id>", "Sender id")
   .option("--to <id>", "Recipient agent id")
@@ -68,7 +68,140 @@ program
       text: opts.text,
       priority: opts.priority,
     });
+    console.error(
+      "note: this only writes to the local mailbox — it will not pop open Claude/Cursor.\nprefer: mailnotmilk chat new -t \"…\"   then share the join link / peer prompt"
+    );
     console.log(JSON.stringify(msg, null, 2));
+  });
+
+const chat = program.command("chat").description("Chat sessions with shareable join links");
+
+chat
+  .command("new")
+  .description("Create a chat and print join link + peer prompt")
+  .option("-t, --title <title>", "Chat title", "Untitled chat")
+  .option("-f, --from <id>", "Creator id")
+  .option("--member <id>", "Invite member (repeatable)", (v, a) => [...a, v], [])
+  .option("--open", "Open hub page in browser")
+  .action(async (opts) => {
+    const { detectProvider } = await import("../src/identity.js");
+    const chats = await import("../src/chats.js");
+    const chatObj = chats.createChat({
+      title: opts.title,
+      createdBy: opts.from || detectProvider(),
+      members: opts.member || [],
+    });
+    const invite = chats.buildInviteBundle(chatObj);
+    console.log(JSON.stringify({ chat: chatObj, invite }, null, 2));
+    console.error("\n—— share this with the other agent ——\n");
+    console.error(invite.peerPrompt);
+    console.error(`\nHub: ${invite.joinUrl}`);
+    if (opts.open) {
+      const { openUrl } = await import("../src/open.js");
+      await openUrl(invite.joinUrl);
+    }
+  });
+
+chat
+  .command("link")
+  .description("Print join link / peer prompt for a chat")
+  .argument("<id>", "Chat id")
+  .action(async (id) => {
+    const chats = await import("../src/chats.js");
+    const chatObj = chats.getChat(id);
+    if (!chatObj) {
+      console.error("chat not found");
+      process.exit(1);
+    }
+    const invite = chats.buildInviteBundle(chatObj);
+    console.log(JSON.stringify(invite, null, 2));
+    console.error("\n" + invite.peerPrompt);
+  });
+
+chat
+  .command("join")
+  .description("Join via invite token")
+  .argument("<token>", "Invite token")
+  .option("-a, --agent <id>", "Your agent id")
+  .action(async (token, opts) => {
+    const { detectProvider } = await import("../src/identity.js");
+    const chats = await import("../src/chats.js");
+    const result = chats.joinByInvite({
+      token,
+      agentId: opts.agent || detectProvider(),
+    });
+    console.log(
+      JSON.stringify(
+        { ...result, invite: chats.buildInviteBundle(result.chat) },
+        null,
+        2
+      )
+    );
+  });
+
+chat
+  .command("say")
+  .description("Post into a chat")
+  .argument("<id>", "Chat id")
+  .requiredOption("-t, --text <text>", "Message")
+  .option("-f, --from <id>")
+  .option("--to <id>")
+  .action(async (id, opts) => {
+    const { detectProvider } = await import("../src/identity.js");
+    const chats = await import("../src/chats.js");
+    const msg = chats.postToChat({
+      chatId: id,
+      from: opts.from || detectProvider(),
+      text: opts.text,
+      to: opts.to || null,
+    });
+    console.log(JSON.stringify(msg, null, 2));
+  });
+
+chat
+  .command("log")
+  .description("Show chat messages")
+  .argument("<id>", "Chat id")
+  .option("-n, --limit <n>", "100")
+  .action(async (id, opts) => {
+    const chats = await import("../src/chats.js");
+    console.log(
+      JSON.stringify(chats.chatMessages(id, { limit: Number(opts.limit) }), null, 2)
+    );
+  });
+
+chat
+  .command("ls")
+  .description("List chats")
+  .action(async () => {
+    const chats = await import("../src/chats.js");
+    console.log(JSON.stringify(chats.listChats(), null, 2));
+  });
+
+chat
+  .command("open")
+  .description("Open chat in local hub (starts hub if needed)")
+  .argument("[id]", "Chat id (optional — opens hub home)")
+  .option("-p, --port <n>", "Hub port", "7879")
+  .action(async (id, opts) => {
+    const port = Number(opts.port);
+    const { ensureHub } = await import("../src/open.js");
+    const base = await ensureHub(port);
+    const { openUrl } = await import("../src/open.js");
+    const url = id ? `${base}/c/${id}` : base;
+    console.error(url);
+    await openUrl(url);
+  });
+
+program
+  .command("hub")
+  .description("Run local HTTP chat hub (shareable links live here)")
+  .option("-p, --port <n>", "Port", "7879")
+  .action(async (opts) => {
+    const { startHub } = await import("../src/hub.js");
+    const { url } = await startHub({ port: Number(opts.port) });
+    console.log(url);
+    await new Promise(() => {});
   });
 
 program

@@ -22,7 +22,7 @@ const priorityZ = z.enum(["low", "normal", "high", "urgent"]).optional();
 export function createServer() {
   const server = new McpServer({
     name: "mailnotmilk",
-    version: "1.1.0",
+    version: "1.2.0",
   });
 
   server.tool(
@@ -350,6 +350,104 @@ export function createServer() {
     "Human-readable status board: agents, rooms, urgent, recent.",
     {},
     async () => textResult(renderBoard())
+  );
+
+  server.tool(
+    "create_chat",
+    "Create a shared chat session and return a join link + peer prompt to paste into Claude/Cursor. (Mail does NOT auto-open the other app.)",
+    {
+      title: z.string().describe("Short chat title"),
+      created_by: z.string().optional(),
+      members: z.array(z.string()).optional(),
+    },
+    async ({ title, created_by, members }) => {
+      const chats = await import("./chats.js");
+      const chat = chats.createChat({
+        title,
+        createdBy: resolveAgentId(created_by),
+        members: members || [],
+      });
+      const invite = chats.buildInviteBundle(chat);
+      return textResult({ ok: true, chat, invite });
+    }
+  );
+
+  server.tool(
+    "join_chat",
+    "Join a chat via invite_token (from a shared link/prompt).",
+    {
+      invite_token: z.string(),
+      agent_id: z.string().optional(),
+    },
+    async ({ invite_token, agent_id }) => {
+      const chats = await import("./chats.js");
+      const result = chats.joinByInvite({
+        token: invite_token,
+        agentId: resolveAgentId(agent_id),
+      });
+      return textResult({
+        ok: true,
+        ...result,
+        invite: chats.buildInviteBundle(result.chat),
+      });
+    }
+  );
+
+  server.tool(
+    "chat_link",
+    "Get the shareable join URL + peer prompt for a chat id.",
+    { chat_id: z.string() },
+    async ({ chat_id }) => {
+      const chats = await import("./chats.js");
+      const chat = chats.getChat(chat_id);
+      if (!chat) return textResult({ ok: false, error: "chat not found" });
+      return textResult({ ok: true, invite: chats.buildInviteBundle(chat) });
+    }
+  );
+
+  server.tool(
+    "chat_say",
+    "Post a message into a chat room (by chat id).",
+    {
+      chat_id: z.string(),
+      text: z.string(),
+      from: z.string().optional(),
+      to: z.string().optional(),
+    },
+    async ({ chat_id, text, from, to }) => {
+      const chats = await import("./chats.js");
+      const msg = chats.postToChat({
+        chatId: chat_id,
+        from: resolveAgentId(from),
+        text,
+        to: to || null,
+      });
+      return textResult({ ok: true, message: msg, summary: summarizeEnvelope(msg) });
+    }
+  );
+
+  server.tool(
+    "chat_history",
+    "List messages in a chat (chronological).",
+    {
+      chat_id: z.string(),
+      limit: z.number().int().min(1).max(500).optional(),
+    },
+    async ({ chat_id, limit }) => {
+      const chats = await import("./chats.js");
+      const messages = chats.chatMessages(chat_id, { limit: limit || 100 });
+      return textResult({ ok: true, count: messages.length, messages });
+    }
+  );
+
+  server.tool(
+    "list_chats",
+    "List recent chat sessions.",
+    { limit: z.number().int().min(1).max(200).optional() },
+    async ({ limit }) => {
+      const chats = await import("./chats.js");
+      return textResult({ ok: true, chats: chats.listChats({ limit: limit || 50 }) });
+    }
   );
 
   return server;
