@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Start hub + ChatGPT/DeepSeek browser relay (CDP attach if Chrome is on :9222).
+# Background hub API + headless ChatGPT/DeepSeek relay (no browser/UI windows).
 # Usage:
 #   ./run.sh
 #   ./run.sh --site chatgpt --peer claude
-#   ./run.sh --site deepseek --browser firefox
+#   ./run.sh --headed          # once, to log in
+#   ./run.sh --open            # optional hub UI
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 

@@ -26,7 +26,7 @@ export async function relayTick({
 } = {}) {
   const status = browser.browserStatus();
   if (!status.connected) {
-    await browser.browserConnect({ browser: "chrome", mode: "launch", headless: false });
+    await browser.browserConnect({ browser: "chrome", mode: "launch", headless: true });
     await browser.browserOpenAi({ site });
   } else if (!status.site || status.site === "custom") {
     await browser.browserOpenAi({ site });

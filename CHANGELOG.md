@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.5.3
+
+- Default **headless** browser + **no hub UI** (`./run.sh` no longer pops windows)
+- CDP / `--remote-debugging-port` is optional (`--cdp`); persistent profile is the default path
+- MCP `browser_connect` defaults `headless: true`
+- Docs/skills: terminal-first MCP UX
+
 ## 1.5.2
 
 - Default **skip** `playwright install-deps` (broken apt PPAs no longer look like hard failures)

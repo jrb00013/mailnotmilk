@@ -237,16 +237,19 @@ program
 
 program
   .command("run")
-  .description("Start hub + browser relay (CDP attach if Chrome on :9222)")
+  .description(
+    "Background hub API + headless browser relay (no UI windows by default)"
+  )
   .option("--site <site>", "chatgpt|deepseek|claude|gemini|copilot", "chatgpt")
   .option("--browser <b>", "chrome|firefox", "chrome")
   .option("--peer <id>", "Coding agent id", "claude")
   .option("--wait <ms>", "Wait for peer reply each tick", "20000")
   .option("--interval <ms>", "Loop interval", "8000")
   .option("--once", "Single tick then exit (default is loop)")
-  .option("--headless", "Launch headed=false browser if not using CDP")
-  .option("--cdp <url>", "Chrome CDP URL", "http://127.0.0.1:9222")
-  .option("--no-open", "Do not open hub in a browser tab")
+  .option("--headed", "Show the Playwright browser (default is headless)")
+  .option("--open", "Also open the hub UI in a browser tab (off by default)")
+  .option("--cdp", "Prefer attaching Chrome on --cdp-url if available")
+  .option("--cdp-url <url>", "Chrome CDP URL", "http://127.0.0.1:9222")
   .action(async (opts) => {
     const { runStack } = await import("../src/run-stack.js");
     await runStack({
@@ -256,9 +259,10 @@ program
       waitMs: Number(opts.wait),
       intervalMs: Number(opts.interval),
       loop: !opts.once,
-      headless: Boolean(opts.headless),
-      cdpUrl: opts.cdp,
-      openBrowser: opts.open !== false,
+      headless: !opts.headed,
+      cdpUrl: opts.cdpUrl,
+      preferCdp: Boolean(opts.cdp),
+      openBrowser: Boolean(opts.open),
     });
   });
 
@@ -302,29 +306,26 @@ program
 
 program
   .command("relay")
-  .description("Relay browser AI chat (Chrome/Firefox) ↔ coding agent via mailnotmilk")
+  .description("Headless browser AI ↔ coding agent relay (no UI by default)")
   .option("--site <site>", "chatgpt|deepseek|claude|gemini|copilot", "chatgpt")
   .option("--browser <b>", "chrome|firefox", "chrome")
   .option("--peer <id>", "Coding agent id", "claude")
   .option("--chat <id>", "Existing chat id")
   .option("--wait <ms>", "Wait for peer reply", "15000")
-  .option("--headless", "Launch browser headless")
+  .option("--headed", "Show browser window (default headless)")
   .option("--loop", "Keep ticking")
   .option("--interval <ms>", "Loop interval", "8000")
-  .option("--cdp-url <url>", "If set (or :9222 up), attach Chrome via CDP")
+  .option("--cdp-url <url>", "Attach Chrome via CDP (optional)")
   .action(async (opts) => {
     const browser = await import("../src/browser.js");
     const { relayTick } = await import("../src/relay.js");
-    const { cdpAvailable } = await import("../src/run-stack.js");
-    const cdpUrl = opts.cdpUrl || "http://127.0.0.1:9222";
-    const useCdp =
-      opts.browser !== "firefox" &&
-      (Boolean(opts.cdpUrl) || (await cdpAvailable(cdpUrl)));
+    const cdpUrl = opts.cdpUrl || null;
+    const useCdp = opts.browser !== "firefox" && Boolean(cdpUrl);
     await browser.browserConnect({
       browser: opts.browser === "firefox" ? "firefox" : "chrome",
       mode: useCdp ? "cdp" : "launch",
-      cdpUrl,
-      headless: Boolean(opts.headless),
+      cdpUrl: cdpUrl || "http://127.0.0.1:9222",
+      headless: !opts.headed,
     });
     await browser.browserOpenAi({ site: opts.site });
     const run = async () => {

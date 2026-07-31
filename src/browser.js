@@ -139,7 +139,7 @@ export async function browserConnect({
   browser = "chrome",
   mode = "launch",
   cdpUrl = "http://127.0.0.1:9222",
-  headless = false,
+  headless = true,
   profileDir = null,
 } = {}) {
   await browserDisconnect();

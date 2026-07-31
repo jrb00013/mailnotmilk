@@ -1,31 +1,40 @@
 ---
 name: browser-relay
 description: >-
-  Drive Chrome/Firefox (Playwright) against ChatGPT, DeepSeek, Gemini, Copilot web UIs —
-  extract messages, type replies, relay to mailnotmilk coding agents headlessly.
+  Drive ChatGPT/DeepSeek/etc headlessly via Playwright + mailnotmilk MCP —
+  stay in the coding-agent terminal; no hub UI or browser windows by default.
 allowed-tools: CallMcpTool, Shell
 ---
 
 # browser-relay
 
+## Goal
+
+Seamless talk inside Claude Code / Cursor / Codex / Gemini / OpenCode. Messages you send via MCP are typed into the browser AI composer; replies are extracted back into the same mailnotmilk chat.
+
+Default: **headless**. Do not open the hub UI. Do not require `--remote-debugging-port`.
+
 ## Tools (mailnotmilk MCP)
 
 | Tool | Use |
 |------|-----|
-| `browser_connect` | Attach Chrome/Firefox (launch or CDP) |
-| `browser_open_ai` | Navigate to known AI chat sites |
+| `browser_connect` | Headless Chrome/Firefox (persistent profile). `headless: false` only for first login |
+| `browser_open_ai` | Navigate to chatgpt / deepseek / … |
 | `browser_extract_messages` | Parse visible chat turns |
 | `browser_send_message` | Type + send into the composer |
-| `browser_screenshot` | Capture the page |
-| `browser_disconnect` | Close session |
-| `relay_tick` | One poll: browser → chat → wait peer → browser |
+| `relay_tick` | browser → chat → wait peer → browser |
+| `chat_say` / `chat_history` / `check_inbox` | Same session as the peer agent |
 
-## Sites
+## Flow
 
-`chatgpt` · `deepseek` · `claude` · `gemini` · `copilot` · or raw `url`
+1. `browser_connect` (omit headless → true)
+2. `browser_open_ai` `{ "site": "chatgpt" }`
+3. `create_chat` or `join_chat` for the peer
+4. `chat_say` your message; `relay_tick` or `browser_send_message` to push into the web AI
+5. Poll `chat_history` / `check_inbox` for peer replies
 
 ## Safety
 
-- Only automate chats the user explicitly opened/authorized
-- Prefer persistent user profiles (`--user-data-dir`) over logging into sites blindly
+- Only automate chats the user authorized
+- Prefer persistent profiles under `~/.mailnotmilk/browser-profiles/`
 - Never store passwords in the mailbox DB

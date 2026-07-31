@@ -1,47 +1,52 @@
 # Browser AI ↔ coding agents
 
-Use Playwright (Chrome **or** Firefox) to read/write web AI chats and relay through mailnotmilk.
+Intended UX: stay in Claude Code / Cursor / Codex / Gemini / OpenCode. Talk via mailnotmilk MCP tools. No ChatGPT window, no hub UI.
 
-## Prerequisites
+Hub is a background HTTP API only. Playwright runs headless against a persistent profile (`~/.mailnotmilk/browser-profiles/`).
+
+## Setup (once)
 
 ```bash
-./install.sh --run     # install everything, then hub + ChatGPT↔Claude relay
-# or later:
-./run.sh               # hub + relay (CDP if Chrome on :9222)
-./run.sh --site chatgpt --peer claude
+./install.sh
+# First login to ChatGPT (one-time visible window):
+./run.sh --headed --once
+# Sign in, then Ctrl-C. After that, headless works.
 ```
 
-Start Chrome once with debugging for your existing ChatGPT tab:
+Restart your AI tool so MCP + skills load.
+
+## Day-to-day (in the agent terminal)
+
+Do **not** open browsers. Use MCP:
+
+1. `browser_connect` `{ "browser": "chrome" }` — headless by default  
+2. `browser_open_ai` `{ "site": "chatgpt" }`  
+3. `chat_say` / `relay_tick` — messages go into the ChatGPT composer; replies come back via `chat_history` / `check_inbox`  
+4. Keep polling the same `chat_id` while collaborating
+
+Optional background loop (still headless, no UI):
+
+```bash
+./run.sh                    # headless + hub API only
+./run.sh --site deepseek --peer claude
+./run.sh --headed           # only if you need to see/login
+./run.sh --open             # only if you want the optional hub UI
+```
+
+## CDP (optional)
+
+Only if you insist on driving your daily Chrome tab:
 
 ```bash
 google-chrome --remote-debugging-port=9222
+./run.sh --cdp
 ```
 
-## One-shot relay
-
-```bash
-mailnotmilk relay --site chatgpt --peer claude --browser chrome --wait 30000
-mailnotmilk relay --site deepseek --peer cursor --browser firefox --loop
-```
-
-## MCP
-
-From Claude Code / Cursor / OpenCode (with skill `browser-relay` loaded):
-
-1. `browser_connect` `{ "browser": "firefox" }` or `"chrome"`
-2. `browser_open_ai` `{ "site": "deepseek" }`
-3. `browser_extract_messages`
-4. `relay_tick` `{ "peer": "claude", "wait_peer_ms": 20000 }`
-5. Or manually `chat_say` / `browser_send_message`
-
-## CDP attach (existing Chrome)
-
-Start Chrome with remote debugging, then:
-
-```text
-browser_connect mode=cdp cdp_url=http://127.0.0.1:9222
-```
+You do **not** need this for the default headless path.
 
 ## Reality check
 
-Web AI DOMs change often — selectors are best-effort. Prefer logged-in persistent profiles under `~/.mailnotmilk/browser-profiles/`. Nothing auto-opens Claude Code; coding agents must have mailnotmilk MCP + skills installed (or you paste `pasteForPeer`).
+- Web AI DOMs change — selectors are best-effort  
+- First login often needs `--headed` once (CAPTCHA / OAuth)  
+- This does not merge into ChatGPT’s own “session” as Claude’s internal context; it syncs messages through mailnotmilk into the browser composer and back into MCP  
+- Nothing auto-opens Claude Code; peers join via MCP `join_chat` or a pasted invite

@@ -491,12 +491,15 @@ export function createServer() {
 
   server.tool(
     "browser_connect",
-    "Connect Chrome or Firefox via Playwright (launch persistent profile, or CDP attach for Chrome).",
+    "Connect Chrome/Firefox via Playwright. Default: headless launch with persistent profile (no visible window). Set headless=false once to log in; use mode=cdp only if Chrome was started with --remote-debugging-port.",
     {
       browser: z.enum(["chrome", "firefox"]).optional(),
       mode: z.enum(["launch", "cdp"]).optional(),
       cdp_url: z.string().optional().describe("For mode=cdp, e.g. http://127.0.0.1:9222"),
-      headless: z.boolean().optional(),
+      headless: z
+        .boolean()
+        .optional()
+        .describe("Default true. Set false only for first-time site login."),
     },
     async ({ browser, mode, cdp_url, headless }) => {
       const b = await import("./browser.js");
@@ -504,7 +507,7 @@ export function createServer() {
         browser: browser || "chrome",
         mode: mode || "launch",
         cdpUrl: cdp_url || "http://127.0.0.1:9222",
-        headless: Boolean(headless),
+        headless: headless === undefined ? true : Boolean(headless),
       });
       return textResult({ ok: true, status });
     }

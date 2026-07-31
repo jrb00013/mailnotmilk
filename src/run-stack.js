@@ -1,5 +1,6 @@
 /**
- * Start hub + browser relay stack (used by ./run.sh and ./install.sh --run).
+ * Background hub + headless browser relay (used by ./run.sh and ./install.sh --run).
+ * Does NOT open browser windows or the hub UI unless explicitly asked.
  */
 
 import http from "node:http";
@@ -35,8 +36,9 @@ export async function cdpAvailable(cdpUrl = "http://127.0.0.1:9222") {
  * @param {number} [opts.waitMs]
  * @param {number} [opts.intervalMs]
  * @param {boolean} [opts.loop]
- * @param {boolean} [opts.headless]
- * @param {boolean} [opts.openBrowser]
+ * @param {boolean} [opts.headless] default true (set false / --headed to see the browser)
+ * @param {boolean} [opts.openBrowser] default false — never pop the hub UI
+ * @param {boolean} [opts.preferCdp] default false — only attach :9222 when true / env set
  * @param {string} [opts.cdpUrl]
  * @param {string|null} [opts.chatId]
  */
@@ -49,16 +51,29 @@ export async function runStack(opts = {}) {
   const waitMs = Number(opts.waitMs ?? 20000);
   const intervalMs = Number(opts.intervalMs ?? 8000);
   const loop = opts.loop !== false; // default loop for ./run.sh
-  const headless = Boolean(opts.headless);
+  // Headless by default — seamless terminal/MCP use. Opt into windows with --headed.
+  const headless =
+    opts.headless === undefined
+      ? process.env.MAILNOTMILK_HEADED !== "1"
+      : Boolean(opts.headless);
+  const openBrowser = Boolean(opts.openBrowser);
+  const preferCdp =
+    opts.preferCdp === true ||
+    process.env.MAILNOTMILK_PREFER_CDP === "1";
   const cdpUrl = opts.cdpUrl || "http://127.0.0.1:9222";
 
-  console.error(`mailnotmilk run: site=${site} peer=${peer} browser=${browserName}`);
+  console.error(
+    `mailnotmilk run: site=${site} peer=${peer} browser=${browserName} headless=${headless}`
+  );
 
+  // Hub is an HTTP API only — stays in background; no browser tab.
   const hubUrl = await ensureHub(hubPort);
-  console.error(`hub: ${hubUrl}`);
+  console.error(`hub (api only): ${hubUrl}`);
 
   const useCdp =
-    browserName !== "firefox" && (await cdpAvailable(cdpUrl));
+    preferCdp &&
+    browserName !== "firefox" &&
+    (await cdpAvailable(cdpUrl));
   if (useCdp) {
     console.error(`browser: attaching CDP ${cdpUrl}`);
     await browser.browserConnect({
@@ -68,13 +83,14 @@ export async function runStack(opts = {}) {
       headless: false,
     });
   } else {
-    if (browserName !== "firefox") {
+    console.error(
+      `browser: launching Playwright ${browserName === "firefox" ? "Firefox" : "Chrome"} ` +
+        `(${headless ? "headless" : "headed"}; profile ~/.mailnotmilk/browser-profiles/)`
+    );
+    if (headless) {
       console.error(
-        `browser: CDP not found at ${cdpUrl} — launching Playwright Chrome.\n` +
-          `  Tip: restart Chrome with: google-chrome --remote-debugging-port=9222`
+        "  First-time login? Run once with --headed, sign into the site, then use headless."
       );
-    } else {
-      console.error("browser: launching Playwright Firefox");
     }
     await browser.browserConnect({
       browser: browserName === "firefox" ? "firefox" : "chrome",
@@ -95,7 +111,7 @@ export async function runStack(opts = {}) {
     console.error(`browser: already on ${status.url}`);
   }
 
-  if (opts.openBrowser !== false) {
+  if (openBrowser) {
     await openUrl(hubUrl).catch(() => {});
   }
 
@@ -111,9 +127,9 @@ export async function runStack(opts = {}) {
     });
     chatId = result.chat?.id || chatId;
     if (result.invite?.pasteForPeer) {
-      console.error("\n—— PASTE INTO CLAUDE CODE / CURSOR / OPENCODE ——\n");
+      console.error("\n—— PASTE INTO PEER AGENT (or use mailnotmilk MCP join_chat) ——\n");
       console.error(result.invite.pasteForPeer);
-      console.error(`\nHub chat: ${result.invite.joinUrl}\n`);
+      console.error("");
     }
     console.log(
       JSON.stringify(
@@ -132,15 +148,6 @@ export async function runStack(opts = {}) {
   };
 
   const first = await tick();
-  if (!browser.browserStatus().cdp) {
-    console.error(
-      "\n⚠  Not attached to your real Chrome tab (cdp=false) — extracted messages may be empty.\n" +
-        "   Quit Chrome completely, then start:\n" +
-        "     google-chrome --remote-debugging-port=9222\n" +
-        "   Open https://chatgpt.com (stay logged in), then:\n" +
-        "     ./run.sh\n"
-    );
-  }
   if (!loop) {
     await browser.browserDisconnect();
     return { hubUrl, chatId, first };
