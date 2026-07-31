@@ -9,3 +9,6 @@ export { renderBoard } from "./board.js";
 export { watchInbox } from "./watch.js";
 export { postTurn, installCursorHooks, installClaudeStopHint } from "./turn.js";
 export { buildHandoffMarkdown, parseHandoffMeta } from "./handoff.js";
+export * as chats from "./chats.js";
+export { startHub, createHubServer } from "./hub.js";
+export { openUrl, ensureHub } from "./open.js";
