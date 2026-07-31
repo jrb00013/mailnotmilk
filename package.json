@@ -1,0 +1,9 @@
+{
+  "name": "mailnotmilk",
+  "version": "0.0.1",
+  "description": "Shared agent mailbox MCP",
+  "license": "MIT",
+  "type": "module",
+  "bin": { "mailnotmilk": "bin/mailnotmilk.js" },
+  "engines": { "node": ">=22.5" }
+}
