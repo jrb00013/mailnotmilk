@@ -10,6 +10,7 @@
 - Stop tracking `.mcp.json` and `.cursor/mcp.json`. `install.sh` regenerates them with the local absolute node path, so committing them shipped one contributor's `/home/<user>/…` into every other checkout. They are now gitignored and still written to disk locally.
 - Extension manifest version tracks the package version (was pinned at `1.0.0`).
 - 5 new tests in `tests/ext-client.test.js` run against a real hub in a child process. The failure mode was specifically cross-process, so an in-process test would have passed with the bug present — these fail if the client is reverted to reading local state.
+- **Fix: `tests/inject.test.js` only passed on a machine with an X display.** "reports a clear reason when no injector is installed" asserted the reason matched `/no keystroke injector|windows matched/`, which omits the `no window title matched` branch. On a headless runner `xwininfo` is installed but reports no windows, so that branch was taken and the assertion failed — it had been passing only because development machines have a real display. The test now exercises `injectIntoWindow` directly (which is what it claims to test), and a second case pins the invariant that every refusal explains itself, for any window count. Verified by reproducing the CI failure against unmodified `main` with a stubbed `xwininfo`.
 
 ## 1.6.5
 
