@@ -80,7 +80,9 @@ async function tabMessage(tabId, msg) {
 async function handleCommand(cmd) {
   switch (cmd.type) {
     case "list_tabs":
-      return listTabs();
+      // Wrapped: callers read `.tabs`. Returning a bare array here meant
+      // `currentUrl()` saw `undefined` and site-following silently did nothing.
+      return { tabs: await listTabs() };
     case "focus_tab": {
       const id = await resolveTabId(cmd);
       await chrome.tabs.update(id, { active: true });
