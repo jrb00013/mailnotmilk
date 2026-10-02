@@ -25,4 +25,22 @@ describe("ext-bridge", () => {
     const data = await pending;
     assert.deepEqual(data, { pong: true });
   });
+
+  it("drops a timed-out command from the queue", async () => {
+    const before = extStatus().pendingCommands;
+    // Nobody is polling /next, so this never gets delivered.
+    await assert.rejects(
+      () => extRequest("send", { text: "stale" }, { timeoutMs: 150 }),
+      /did not respond/
+    );
+    // It must not be left behind: the extension long-polls this queue, so a
+    // command nobody is waiting on would still fire against a real tab later.
+    assert.equal(
+      extStatus().pendingCommands,
+      before,
+      "timed-out command must not linger in the queue"
+    );
+    const next = await takeExtCommand({ timeoutMs: 300 });
+    assert.equal(next, null, "stale command must not be delivered late");
+  });
 });
