@@ -7,7 +7,7 @@ import { ensureHub, openUrl } from "./open.js";
 import * as browser from "./browser.js";
 import { relayTick } from "./relay.js";
 import { cdpUp, ensureChromeCdp } from "./chrome-session.js";
-import * as ext from "./ext-bridge.js";
+import * as ext from "./ext-client.js";
 import {
   installChromeExtension,
   extensionInstallHint,
@@ -32,12 +32,13 @@ export function extensionDir() {
 /** Wait until the Chrome extension has said hello (or timeout). */
 export async function waitForExtension({ timeoutMs = 15000 } = {}) {
   const start = Date.now();
+  let st = await ext.extStatus();
   while (Date.now() - start < timeoutMs) {
-    const st = ext.extStatus();
     if (st.connected || st.lastHello) return st;
     await new Promise((r) => setTimeout(r, 400));
+    st = await ext.extStatus();
   }
-  return ext.extStatus();
+  return st;
 }
 
 function siteHomeUrl(site) {

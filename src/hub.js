@@ -313,6 +313,22 @@ export function createHubServer({ port = DEFAULT_PORT } = {}) {
         return json(res, 200, ext.resolveExtResult(body));
       }
 
+      // The hub owns the extension command queue, so out-of-process callers
+      // (relay, run-stack, the MCP server) reach the extension through here
+      // rather than importing ext-bridge.js — module state does not cross a
+      // process boundary. Holds the request open until the extension answers.
+      if (path === "/api/ext/command" && req.method === "POST") {
+        const body = await readBody(req);
+        const { type, payload = {}, timeoutMs = 60000 } = body || {};
+        if (!type) return json(res, 400, { ok: false, error: "type required" });
+        try {
+          const data = await ext.extRequest(type, payload, { timeoutMs: Number(timeoutMs) });
+          return json(res, 200, { ok: true, data });
+        } catch (err) {
+          return json(res, 200, { ok: false, error: err.message || String(err) });
+        }
+      }
+
       if (path === "/api/chats" && req.method === "GET") {
         return json(res, 200, { chats: listChats() });
       }

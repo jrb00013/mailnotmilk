@@ -94,8 +94,12 @@ export async function relayTick({
 } = {}) {
   const status = browser.browserStatus();
   if (!status.connected) {
-    const ext = await import("./ext-bridge.js");
-    if (ext.extStatus().connected || ext.extStatus().lastHello) {
+    // Ask the hub whether the extension is there. Importing ext-bridge.js here
+    // would read this process's own empty copy of the queue and always answer
+    // "no extension", forcing a pointless headed Chrome launch.
+    const ext = await import("./ext-client.js");
+    const st = await ext.extStatus();
+    if (st.connected || st.lastHello) {
       await browser.browserConnect({ mode: "extension" });
     } else {
       await browser.browserConnect({
