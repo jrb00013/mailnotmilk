@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "mailnotmilk",
-  "version": "1.0.0",
+  "version": "1.6.6",
   "description": "Drive any browser AI tab from mailnotmilk — normal Chrome, no --remote-debugging-port.",
   "permissions": ["tabs", "scripting", "storage", "alarms"],
   "host_permissions": [

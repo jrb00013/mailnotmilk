@@ -83,6 +83,12 @@ export function extRequest(type, payload = {}, { timeoutMs = 60000 } = {}) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pending.delete(requestId);
+      // Also drop the queued command. Once the caller has given up there is
+      // nobody left to receive its result, and the extension long-polls this
+      // queue — leaving it behind meant a timed-out command could still fire
+      // against a real tab minutes later, typing into a chat nobody is reading.
+      const qi = commandQueue.findIndex((c) => c.id === requestId);
+      if (qi >= 0) commandQueue.splice(qi, 1);
       reject(
         new Error(
           `Extension did not respond to ${type} in ${timeoutMs}ms — is the mailnotmilk Chrome extension installed and Chrome open?`

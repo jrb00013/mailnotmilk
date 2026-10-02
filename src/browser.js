@@ -7,13 +7,21 @@
 import { mkdirSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { dataDir, ensureDataDir } from "./paths.js";
-import * as ext from "./ext-bridge.js";
+import * as ext from "./ext-client.js";
 
 let _pw = null;
 let _browser = null;
 let _context = null;
 let _page = null;
-let _meta = { browser: null, site: null, cdp: false, mode: null, tabId: null };
+let _meta = {
+  browser: null,
+  site: null,
+  cdp: false,
+  mode: null,
+  tabId: null,
+  extensionStatus: null,
+  extensionSeen: false,
+};
 
 /**
  * Cross-site fallbacks. Any URL works without a dedicated entry — a site block
@@ -295,14 +303,17 @@ export function browserStatus() {
   return {
     connected:
       _meta.mode === "extension"
-        ? Boolean(ext.extStatus().connected || ext.extStatus().lastHello)
+        ? Boolean(_meta.extensionSeen)
         : Boolean(_page),
     browser: _meta.browser,
     site: _meta.site,
     cdp: _meta.cdp,
     mode: _meta.mode,
     tabId: _meta.tabId,
-    extension: ext.extStatus(),
+    extension: _meta.extensionStatus || {
+      connected: false,
+      lastHello: null,
+    },
     url: _page ? _page.url() : null,
   };
 }
@@ -318,18 +329,32 @@ export async function browserConnect({
   const name = browser === "firefox" ? "firefox" : "chromium";
 
   if (mode === "extension") {
+    // The extension only ever talks to the hub, so ask the hub whether it is
+    // there. Doing this at connect time is what makes `./run.sh` report the
+    // truth instead of guessing from a local (always empty) copy of the state.
+    const extStatusNow = await ext.extStatus();
     _meta = {
       browser: "chrome-extension",
       site: null,
       cdp: false,
       mode: "extension",
       tabId: null,
+      extensionStatus: extStatusNow,
+      extensionSeen: Boolean(extStatusNow.connected || extStatusNow.lastHello),
     };
     return browserStatus();
   }
 
   const pw = await loadPlaywright();
-  _meta = { browser: name, site: null, cdp: mode === "cdp", mode, tabId: null };
+  _meta = {
+    browser: name,
+    site: null,
+    cdp: mode === "cdp",
+    mode,
+    tabId: null,
+    extensionStatus: null,
+    extensionSeen: false,
+  };
 
   if (mode === "cdp") {
     if (name !== "chromium") {
@@ -390,7 +415,15 @@ export async function browserDisconnect() {
   _browser = null;
   _context = null;
   _page = null;
-  _meta = { browser: null, site: null, cdp: false, mode: null, tabId: null };
+  _meta = {
+    browser: null,
+    site: null,
+    cdp: false,
+    mode: null,
+    tabId: null,
+    extensionStatus: null,
+    extensionSeen: false,
+  };
   return { ok: true };
 }
 

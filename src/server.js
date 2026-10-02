@@ -503,10 +503,10 @@ export function createServer() {
     },
     async ({ browser, mode, cdp_url, headless }) => {
       const b = await import("./browser.js");
-      const ext = await import("./ext-bridge.js");
+      const ext = await import("./ext-client.js");
       let resolvedMode = mode || null;
       if (!resolvedMode) {
-        const st = ext.extStatus();
+        const st = await ext.extStatus();
         if (st.connected || st.lastHello) resolvedMode = "extension";
         else {
           const { ensureChromeCdp } = await import("./chrome-session.js");

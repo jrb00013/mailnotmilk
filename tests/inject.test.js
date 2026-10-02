@@ -1,6 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { detectInjector, findWindows, injectIntoMatchingWindow } from "../src/inject.js";
+import {
+  detectInjector,
+  findWindows,
+  injectIntoWindow,
+  injectIntoMatchingWindow,
+} from "../src/inject.js";
 
 describe("injector detection", () => {
   it("returns null or a known backend, never throws", () => {
@@ -47,11 +52,26 @@ describe("window matching", () => {
 
   it("reports a clear reason when no injector is installed", () => {
     if (detectInjector()) return; // tool present — nothing to assert
+    // Exercise injectIntoWindow directly. Going through
+    // injectIntoMatchingWindow(".") would depend on how many X windows this
+    // machine happens to have: 0 gives "no window title matched", 2+ gives
+    // "N windows matched", and exactly 1 falls through to the injector check.
+    // That is why this failed only on CI, where the runner has one window.
+    const r = injectIntoWindow({ windowId: "0x1", text: "hi" });
+    assert.equal(r.ok, false);
+    assert.match(r.reason, /no keystroke injector|only xdotool supports/);
+  });
+
+  it("explains itself for every outcome of an ambiguous pattern", () => {
+    // Whatever the window count is, refusing to type must come with a reason
+    // that says why — this is the invariant the test above used to assume.
     const r = injectIntoMatchingWindow({ titlePattern: ".", text: "hi" });
     assert.equal(r.ok, false);
     assert.ok(
-      /no keystroke injector|windows matched/.test(r.reason),
-      "must explain why nothing was typed"
+      /no keystroke injector|windows matched|no window title matched|only xdotool supports/.test(
+        r.reason
+      ),
+      `must explain why nothing was typed, got: ${r.reason}`
     );
   });
 });
