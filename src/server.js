@@ -3,6 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { detectProvider, sanitizeId } from "./identity.js";
 import { summarizeEnvelope } from "./envelope.js";
+import { VERSION } from "./version.js";
 import { renderBoard } from "./board.js";
 import { postTurn } from "./turn.js";
 import * as store from "./store.js";
@@ -22,7 +23,7 @@ const priorityZ = z.enum(["low", "normal", "high", "urgent"]).optional();
 export function createServer() {
   const server = new McpServer({
     name: "mailnotmilk",
-    version: "1.5.0",
+    version: VERSION,
   });
 
   server.tool(

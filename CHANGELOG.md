@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Fix: the MCP server advertised version `1.5.0` while the package was `1.6.6`.** It was a hand-written literal, so it drifted as soon as the package was bumped. `src/version.js` now reads `package.json` once and every reporter uses it; a new test also pins the extension manifest to the same version so the two cannot drift again.
+
 ## 1.6.6
 
 - **Fix: the Chrome extension bridge never actually connected.** The extension's command queue lives in `ext-bridge.js`, and only the hub process ever touched it — the extension posts `/api/ext/hello` and long-polls `/api/ext/next` against the hub. But `run-stack`, `relay`, `browser` and the MCP server are separate processes that imported the same module, so each read its own *empty* copy. Module state does not cross a process boundary. Consequences: `./run.sh` always burned ~28s waiting for a hello that had already arrived, printed "extension still silent", and silently downgraded to CDP/Playwright — while the Chrome window it had just launched was already running the extension. Any extension command from those processes timed out after 60s. New `src/ext-client.js` reaches the queue over HTTP via a new hub endpoint `POST /api/ext/command`, which holds the request open until the extension answers. `ext-bridge.js` is now imported only by the hub that owns the state.
