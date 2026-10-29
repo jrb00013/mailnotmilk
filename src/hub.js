@@ -14,9 +14,31 @@ import {
 import { detectProvider } from "./identity.js";
 import { getDb } from "./store.js";
 import { renderBoard } from "./board.js";
+import { VERSION } from "./version.js";
 import * as ext from "./ext-bridge.js";
 
 const DEFAULT_PORT = Number(process.env.MAILNOTMILK_HUB_PORT || 7879);
+const DEFAULT_MAX_BODY_BYTES = Math.max(
+  1024,
+  Number(process.env.MAILNOTMILK_MAX_BODY_BYTES) || 1_000_000
+);
+
+function httpError(statusCode, message) {
+  const err = new Error(message);
+  err.statusCode = statusCode;
+  return err;
+}
+
+/**
+ * Keep extension waits inside a range the hub can actually honour.
+ * An unbounded `timeoutMs` from a query string used to let a caller pin a
+ * request (and its pending entry) open arbitrarily long.
+ */
+export function clampTimeoutMs(value, { fallback = 25_000, min = 1_000, max = 60_000 } = {}) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(Math.max(Math.trunc(n), min), max);
+}
 
 function json(res, status, body) {
   const data = JSON.stringify(body, null, 2);
@@ -32,20 +54,46 @@ function html(res, status, body) {
   res.end(body);
 }
 
-function readBody(req) {
+function readBody(req, maxBytes) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    req.on("data", (c) => chunks.push(c));
+    let size = 0;
+    let settled = false;
+
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      reject(err);
+    };
+
+    req.on("data", (c) => {
+      if (settled) return;
+      size += c.length;
+      if (size > maxBytes) {
+        // Drain the rest so the 413 can still be written; dropping the socket
+        // here would race the response.
+        req.resume();
+        fail(httpError(413, `request body exceeds ${maxBytes} bytes`));
+        return;
+      }
+      chunks.push(c);
+    });
+
     req.on("end", () => {
+      if (settled) return;
+      settled = true;
       const raw = Buffer.concat(chunks).toString("utf8");
       if (!raw) return resolve({});
       try {
         resolve(JSON.parse(raw));
       } catch {
-        resolve({ raw });
+        // Silently handing back `{ raw }` made a malformed POST look like an
+        // empty one, so the caller got a confusing 400/201 instead of the real
+        // cause. Reject with a 400 the outer handler can send.
+        reject(httpError(400, "invalid JSON body"));
       }
     });
-    req.on("error", reject);
+    req.on("error", fail);
   });
 }
 
@@ -263,7 +311,7 @@ function chatPage(chat, invite) {
   );
 }
 
-export function createHubServer({ port = DEFAULT_PORT } = {}) {
+export function createHubServer({ port = DEFAULT_PORT, maxBodyBytes = DEFAULT_MAX_BODY_BYTES } = {}) {
   getDb();
   ensureChatSchema();
 
@@ -279,6 +327,15 @@ export function createHubServer({ port = DEFAULT_PORT } = {}) {
           "Access-Control-Allow-Headers": "Content-Type",
         });
         return res.end();
+      }
+
+      if ((path === "/healthz" || path === "/health") && req.method === "GET") {
+        return json(res, 200, {
+          ok: true,
+          name: "mailnotmilk",
+          version: VERSION,
+          uptimeSeconds: Math.round(process.uptime()),
+        });
       }
 
       if (path === "/" && req.method === "GET") {
@@ -298,18 +355,18 @@ export function createHubServer({ port = DEFAULT_PORT } = {}) {
       }
 
       if (path === "/api/ext/hello" && req.method === "POST") {
-        const body = await readBody(req);
+        const body = await readBody(req, maxBodyBytes);
         return json(res, 200, ext.noteExtHello(body));
       }
 
       if (path === "/api/ext/next" && req.method === "GET") {
-        const timeoutMs = Number(url.searchParams.get("timeoutMs") || 25000);
+        const timeoutMs = clampTimeoutMs(url.searchParams.get("timeoutMs"));
         const command = await ext.takeExtCommand({ timeoutMs });
         return json(res, 200, { command });
       }
 
       if (path === "/api/ext/result" && req.method === "POST") {
-        const body = await readBody(req);
+        const body = await readBody(req, maxBodyBytes);
         return json(res, 200, ext.resolveExtResult(body));
       }
 
@@ -318,11 +375,13 @@ export function createHubServer({ port = DEFAULT_PORT } = {}) {
       // rather than importing ext-bridge.js — module state does not cross a
       // process boundary. Holds the request open until the extension answers.
       if (path === "/api/ext/command" && req.method === "POST") {
-        const body = await readBody(req);
-        const { type, payload = {}, timeoutMs = 60000 } = body || {};
+        const body = await readBody(req, maxBodyBytes);
+        const { type, payload = {}, timeoutMs = 60_000 } = body || {};
         if (!type) return json(res, 400, { ok: false, error: "type required" });
         try {
-          const data = await ext.extRequest(type, payload, { timeoutMs: Number(timeoutMs) });
+          const data = await ext.extRequest(type, payload, {
+            timeoutMs: clampTimeoutMs(timeoutMs, { fallback: 60_000, max: 120_000 }),
+          });
           return json(res, 200, { ok: true, data });
         } catch (err) {
           return json(res, 200, { ok: false, error: err.message || String(err) });
@@ -334,7 +393,7 @@ export function createHubServer({ port = DEFAULT_PORT } = {}) {
       }
 
       if (path === "/api/chats" && req.method === "POST") {
-        const body = await readBody(req);
+        const body = await readBody(req, maxBodyBytes);
         const chat = createChat({
           title: body.title || "Untitled chat",
           createdBy: body.createdBy || detectProvider(),
@@ -354,7 +413,7 @@ export function createHubServer({ port = DEFAULT_PORT } = {}) {
         return json(res, 200, { messages: chatMessages(chat.id) });
       }
       if (chatMsg && req.method === "POST") {
-        const body = await readBody(req);
+        const body = await readBody(req, maxBodyBytes);
         const chat = getChat(chatMsg[1]);
         if (!chat) return json(res, 404, { error: "not found" });
         if (body.invite) {
@@ -385,7 +444,7 @@ export function createHubServer({ port = DEFAULT_PORT } = {}) {
 
       const joinApi = path.match(/^\/api\/join\/([^/]+)$/);
       if (joinApi && req.method === "POST") {
-        const body = await readBody(req);
+        const body = await readBody(req, maxBodyBytes);
         const result = joinByInvite({
           token: joinApi[1],
           agentId: body.agentId || detectProvider(),
@@ -420,7 +479,9 @@ export function createHubServer({ port = DEFAULT_PORT } = {}) {
 
       json(res, 404, { error: "not found", path });
     } catch (err) {
-      json(res, 500, { error: err.message || String(err) });
+      const status = Number(err.statusCode) || 500;
+      if (res.headersSent) return res.end();
+      json(res, status, { error: err.message || String(err) });
     }
   });
 
