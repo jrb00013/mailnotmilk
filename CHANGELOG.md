@@ -3,6 +3,7 @@
 ## Unreleased
 
 - **Fix: the MCP server advertised version `1.5.0` while the package was `1.6.6`.** It was a hand-written literal, so it drifted as soon as the package was bumped. `src/version.js` now reads `package.json` once and every reporter uses it; a new test also pins the extension manifest to the same version so the two cannot drift again.
+- **Hub request handling had no limits.** `/api/*` POSTs buffered unbounded bodies into memory, and a malformed JSON body was silently rewritten to `{ raw }`, which made a broken request look like an empty one. Bodies are now capped (default 1 MB, `MAILNOTMILK_MAX_BODY_BYTES` or `createHubServer({ maxBodyBytes })`), oversize requests get a 413, malformed JSON gets a 400, and stray errors carry their real status code. Extension long-poll/command `timeoutMs` is clamped to 1–120 s instead of trusting a query string. New `/healthz` (also `/health`) returns `{ ok, name, version, uptimeSeconds }`.
 
 ## 1.6.6
 
