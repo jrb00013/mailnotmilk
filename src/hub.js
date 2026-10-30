@@ -182,7 +182,25 @@ function escapeHtml(s) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/**
+ * JSON safe to inline inside a <script> block.
+ *
+ * JSON.stringify alone does not escape `<`, so a string containing
+ * `</script>` closes the element and everything after it becomes markup. The
+ * invite token is read from the query string, so that was reachable without
+ * any database write.
+ */
+function scriptJson(value) {
+  return JSON.stringify(value)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/&/g, "\\u0026")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
 }
 
 function homePage() {
@@ -262,8 +280,8 @@ function chatPage(chat, invite) {
       <p style="color:var(--muted);margin:0">id <code>${escapeHtml(chat.id)}</code> · room <code>${escapeHtml(chat.room)}</code> · members ${chat.members.map((m) => escapeHtml(m.agentId)).join(", ")}</p>
       <div class="row">
         <a class="btn" href="${escapeHtml(bundle.joinUrl)}">Join URL</a>
-        <button class="secondary" type="button" onclick="navigator.clipboard.writeText(document.getElementById('peer').value)">Copy peer prompt</button>
-        <button class="secondary" type="button" onclick="navigator.clipboard.writeText('${escapeHtml(bundle.joinUrl)}')">Copy link</button>
+        <button class="secondary" type="button" data-copy-from="peer">Copy peer prompt</button>
+        <button class="secondary" type="button" data-copy="${escapeHtml(bundle.joinUrl)}">Copy link</button>
         <a class="btn secondary" href="/api/chats/${escapeHtml(chat.id)}/invite">Invite JSON</a>
       </div>
     </div>
@@ -281,21 +299,33 @@ function chatPage(chat, invite) {
       </form>
     </div>
     <script>
-      const chatId = ${JSON.stringify(chat.id)};
-      const invite = ${JSON.stringify(invite || chat.inviteToken)};
+      const chatId = ${scriptJson(chat.id)};
+      const invite = ${scriptJson(invite || chat.inviteToken)};
+      const esc = s => String(s).replace(/[&<>"']/g, c => ({
+        '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+      }[c]));
       async function refresh() {
-        const res = await fetch('/api/chats/' + chatId + '/messages');
+        const res = await fetch('/api/chats/' + encodeURIComponent(chatId) + '/messages');
         const data = await res.json();
         const el = document.getElementById('thread');
         el.innerHTML = (data.messages || []).map(m => {
           const cls = m.type === 'system' ? 'system' : m.type === 'handoff' ? 'handoff' : '';
-          const to = m.to ? (' → ' + m.to) : '';
-          return '<div class="msg ' + cls + '"><div class="meta">#' + m.id + ' · ' + m.from + to + ' · ' + m.ts + ' · ' + m.type + '</div><div>' +
-            String(m.text).replace(/[&<>]/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[s])) +
+          const to = m.to ? (' → ' + esc(m.to)) : '';
+          return '<div class="msg ' + cls + '"><div class="meta">#' + Number(m.id) + ' · ' + esc(m.from) + to + ' · ' + esc(m.ts) + ' · ' + esc(m.type) + '</div><div>' +
+            esc(m.text) +
             '</div></div>';
         }).join('') || '<p style="color:var(--muted)">No messages yet.</p>';
       }
       setInterval(refresh, 2000);
+      for (const el of document.querySelectorAll('[data-copy]')) {
+        el.addEventListener('click', () => navigator.clipboard.writeText(el.dataset.copy));
+      }
+      for (const el of document.querySelectorAll('[data-copy-from]')) {
+        el.addEventListener('click', () => {
+          const src = document.getElementById(el.dataset.copyFrom);
+          if (src) navigator.clipboard.writeText(src.value);
+        });
+      }
       document.getElementById('say').addEventListener('submit', async (e) => {
         e.preventDefault();
         const fd = new FormData(e.target);
