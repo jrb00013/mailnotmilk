@@ -338,7 +338,7 @@ export function getMessage(id) {
 
 export function checkInbox(
   agentId,
-  { limit = 20, room = null, includeArchived = false, priority = null } = {}
+  { limit = 20, room = null, includeArchived = false, priority = null, offset = 0 } = {}
 ) {
   const id = sanitizeId(agentId);
   registerAgent({ id, status: "waiting" });
@@ -367,8 +367,9 @@ export function checkInbox(
     CASE m.priority
       WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
     m.id ASC
-    LIMIT ?`;
+    LIMIT ? OFFSET ?`;
   params.push(Math.min(Math.max(Number(limit) || 20, 1), 100));
+  params.push(Math.max(0, Math.floor(Number(offset) || 0)));
   return getDb()
     .prepare(sql)
     .all(...params)
