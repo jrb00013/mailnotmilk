@@ -436,8 +436,13 @@ export function searchMessages({
   includeArchived = false,
 } = {}) {
   if (!query || !String(query).trim()) throw new Error("search requires query");
-  const params = [`%${String(query).trim()}%`];
-  let sql = `SELECT * FROM messages WHERE body LIKE ?`;
+  // LIKE treats % and _ as wildcards. A user searching for "100%" or
+  // "file_name" expects those characters literally, not every message.
+  const pattern = `%${String(query)
+    .trim()
+    .replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+  const params = [pattern];
+  let sql = `SELECT * FROM messages WHERE body LIKE ? ESCAPE '\\'`;
   if (!includeArchived) sql += ` AND archived = 0`;
   if (room) {
     sql += ` AND room = ?`;
