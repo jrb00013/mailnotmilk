@@ -8,6 +8,7 @@ import { mkdirSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { dataDir, ensureDataDir } from "./paths.js";
 import * as ext from "./ext-client.js";
+import { latency } from "./latency.js";
 
 let _pw = null;
 let _browser = null;
@@ -389,13 +390,41 @@ export async function resolveBrowserConnectMode({
   };
 }
 
+function sameEndpoint(a, b) {
+  try {
+    const ua = new URL(a);
+    const ub = new URL(b);
+    return ua.host === ub.host && ua.pathname === ub.pathname;
+  } catch {
+    return String(a) === String(b);
+  }
+}
+
 export async function browserConnect({
   browser = "chrome",
   mode = "launch",
   cdpUrl = "http://127.0.0.1:9222",
   headless = process.env.MAILNOTMILK_HEADED !== "1",
   profileDir = null,
+  force = false,
 } = {}) {
+  const lat = latency();
+  // Reuse an existing live CDP/extension session — biggest round-trip win.
+  if (
+    !force &&
+    lat.reuseCdpSession &&
+    _meta.mode &&
+    (mode === "auto" || mode === _meta.mode || (mode === "cdp" && _meta.mode === "cdp"))
+  ) {
+    if (_meta.mode === "extension" && _meta.extensionSeen) return browserStatus();
+    if (_meta.mode === "cdp" && _page && _meta.cdpUrl) {
+      const want = String(cdpUrl || _meta.cdpUrl);
+      if (sameEndpoint(_meta.cdpUrl, want) || want.includes("9223") || want.includes("9222")) {
+        return browserStatus();
+      }
+    }
+  }
+
   await browserDisconnect();
   const name = browser === "firefox" ? "firefox" : "chromium";
 
@@ -683,9 +712,10 @@ export async function recoverBrowserForCloudflare({
       cdpUrl: sess.cdpUrl || recoverUrl,
       headless: "new",
     });
+    const lat = latency();
     await attachChatgptPage(openUrl);
-    _meta.site = site || "chatgpt";
-    await sleep(1500);
+    _meta.site = site || detectSiteFromUrl(openUrl) || _meta.site;
+    if (lat.postNavSettleMs) await sleep(lat.postNavSettleMs);
 
     let stillCf = await isCloudflareChallenge().catch(() => true);
     if (stillCf) {
@@ -709,10 +739,11 @@ export async function recoverBrowserForCloudflare({
         mode: "cdp",
         cdpUrl: warm.cdpUrl || recoverUrl,
         headless: "offscreen",
+        force: true,
       });
       await attachChatgptPage(openUrl);
-      _meta.site = site || "chatgpt";
-      await sleep(1500);
+      _meta.site = site || detectSiteFromUrl(openUrl) || _meta.site;
+      if (lat.postNavSettleMs) await sleep(lat.postNavSettleMs);
       stillCf = await isCloudflareChallenge().catch(() => true);
     }
 
@@ -800,7 +831,9 @@ export async function isCloudflareChallenge() {
  * Wait until Cloudflare clears (user clicks the checkbox).
  * Returns { ok, waitedMs, challenge }.
  */
-export async function waitForCloudflareClear({ timeoutMs = 180_000 } = {}) {
+export async function waitForCloudflareClear({ timeoutMs = null } = {}) {
+  const lat = latency();
+  const budget = timeoutMs == null ? lat.cfDefaultTimeoutMs : timeoutMs;
   if (_meta.mode === "extension") {
     const start = Date.now();
     let challenge = await isCloudflareChallenge();
@@ -808,8 +841,8 @@ export async function waitForCloudflareClear({ timeoutMs = 180_000 } = {}) {
     console.error(
       "browser: Cloudflare challenge in extension tab — waiting for auto-clear / prior login cookies."
     );
-    while (Date.now() - start < timeoutMs) {
-      await sleep(1500);
+    while (Date.now() - start < budget) {
+      await sleep(lat.cfPollMs);
       if (!(await isCloudflareChallenge())) {
         return { ok: true, waitedMs: Date.now() - start, challenge: true };
       }
@@ -826,24 +859,52 @@ export async function waitForCloudflareClear({ timeoutMs = 180_000 } = {}) {
       ? "browser: Cloudflare challenge — waiting for automated clear (no desktop window)."
       : "browser: Cloudflare challenge detected — waiting for clear."
   );
-  while (Date.now() - start < timeoutMs) {
-    await sleep(1500);
+  while (Date.now() - start < budget) {
+    await sleep(lat.cfPollMs);
     challenge = await isCloudflareChallenge();
     if (!challenge) {
-      await sleep(2000);
+      if (lat.cfClearExtraMs) await sleep(lat.cfClearExtraMs);
       console.error("browser: Cloudflare cleared");
       return { ok: true, waitedMs: Date.now() - start, challenge: true };
     }
-    const hasComposer = await page
-      .locator('#prompt-textarea, div[contenteditable="true"], textarea')
-      .first()
-      .count()
-      .catch(() => 0);
-    if (hasComposer > 0 && !(await isCloudflareChallenge())) {
-      return { ok: true, waitedMs: Date.now() - start, challenge: true };
+    // Cheap readiness probe every other poll
+    if (((Date.now() - start) / lat.cfPollMs) % 2 < 1) {
+      const hasComposer = await page
+        .locator('#prompt-textarea, div[contenteditable="true"], textarea')
+        .first()
+        .count()
+        .catch(() => 0);
+      if (hasComposer > 0 && !(await isCloudflareChallenge())) {
+        return { ok: true, waitedMs: Date.now() - start, challenge: true };
+      }
     }
   }
   return { ok: false, waitedMs: Date.now() - start, challenge: true };
+}
+
+/** Wait until composer is present or budget exhausted — replaces fixed sleeps. */
+async function waitForComposer(page, selectors, { retries = null, retryMs = null } = {}) {
+  const lat = latency();
+  const n = retries == null ? lat.composerRetries : retries;
+  const gap = retryMs == null ? lat.composerRetryMs : retryMs;
+  for (let i = 0; i < n; i++) {
+    const found = await firstSelector(page, selectors);
+    if (found) return found;
+    await sleep(gap);
+  }
+  return null;
+}
+
+function urlsMatch(a, b) {
+  try {
+    const ua = new URL(a);
+    const ub = new URL(b);
+    const norm = (u) =>
+      `${u.origin}${u.pathname.replace(/\/$/, "")}${u.search}`;
+    return norm(ua) === norm(ub);
+  } catch {
+    return String(a) === String(b);
+  }
 }
 
 export async function browserOpenAi({ site = null, url = null } = {}) {
@@ -869,34 +930,45 @@ export async function browserOpenAi({ site = null, url = null } = {}) {
     siteKey = detectSiteFromUrl(target) || site || "custom";
   }
 
-  // Re-inject primary cookies for this target host right before navigation
-  // (Firefox session tokens, etc.) — site-agnostic.
+  // Re-inject primary cookies only when target host changed (cache hit skips work).
   if (
     _context &&
     _meta.mode !== "extension" &&
     process.env.MAILNOTMILK_IMPORT_PRIMARY !== "0"
   ) {
+    const prevTarget = _meta.primaryCookies?.target || "";
+    let prevHost = "";
+    let nextHost = "";
     try {
-      const {
-        extractPrimaryCookies,
-        injectCookiesIntoContext,
-      } = await import("./primary-browser.js");
-      const jar = extractPrimaryCookies({ targets: [target] });
-      if (jar.ok && jar.cookies?.length) {
-        const inj = await injectCookiesIntoContext(_context, jar.cookies);
-        _meta.primaryCookies = {
-          browser: jar.browser,
-          injected: inj.injected,
-          score: jar.score,
-          profileDir: jar.profileDir,
-          target,
-        };
-        console.error(
-          `browser: refreshed ${inj.injected} primary ${jar.browser} cookies for ${target}`
-        );
+      prevHost = new URL(prevTarget).hostname;
+      nextHost = new URL(target).hostname;
+    } catch {
+      nextHost = target;
+    }
+    if (prevHost !== nextHost) {
+      try {
+        const {
+          extractPrimaryCookies,
+          injectCookiesIntoContext,
+        } = await import("./primary-browser.js");
+        const jar = extractPrimaryCookies({ targets: [target] });
+        if (jar.ok && jar.cookies?.length) {
+          const inj = await injectCookiesIntoContext(_context, jar.cookies);
+          _meta.primaryCookies = {
+            browser: jar.browser,
+            injected: inj.injected,
+            score: jar.score,
+            profileDir: jar.profileDir,
+            target,
+            cached: Boolean(jar.cached),
+          };
+          console.error(
+            `browser: refreshed ${inj.injected} primary ${jar.browser} cookies for ${target}${jar.cached ? " (cached)" : ""}`
+          );
+        }
+      } catch (err) {
+        console.error(`browser: cookie refresh error: ${err.message}`);
       }
-    } catch (err) {
-      console.error(`browser: cookie refresh error: ${err.message}`);
     }
   }
 
@@ -913,7 +985,7 @@ export async function browserOpenAi({ site = null, url = null } = {}) {
     }
     _meta.site = siteKey;
     _meta.tabId = focused.tabId;
-    const cf = await waitForCloudflareClear({ timeoutMs: 180_000 });
+    const cf = await waitForCloudflareClear();
     return {
       ...browserStatus(),
       title: focused.title || null,
@@ -923,11 +995,23 @@ export async function browserOpenAi({ site = null, url = null } = {}) {
   }
 
   const page = requirePage();
-  await page.goto(target, { waitUntil: "domcontentloaded", timeout: 60_000 });
-  await sleep(1500);
+  const lat = latency();
+  const alreadyThere = urlsMatch(page.url(), target);
+  if (!alreadyThere) {
+    await page.goto(target, { waitUntil: "domcontentloaded", timeout: 60_000 });
+  }
   _meta.site = siteKey;
 
-  if (await isCloudflareChallenge()) {
+  // Fast path: if composer is already up, skip long CF waits.
+  const siteCfg = siteConfig(siteKey);
+  const composers = siteCfg?.composerSelectors || [
+    "textarea",
+    'div[contenteditable="true"]',
+  ];
+  const ready = await waitForComposer(page, composers, {
+    retries: alreadyThere ? 2 : Math.min(6, lat.composerRetries),
+  });
+  if (!ready && (await isCloudflareChallenge())) {
     if (shouldAttemptCfRecovery()) {
       const recovery = await recoverBrowserForCloudflare({ site: siteKey });
       return {
@@ -938,16 +1022,21 @@ export async function browserOpenAi({ site = null, url = null } = {}) {
         headlessMode: _meta.headlessMode,
       };
     }
+    const cf = await waitForCloudflareClear();
+    if (!cf.ok) {
+      console.error(
+        "browser: still on Cloudflare after timeout — messages will not extract until you pass the check"
+      );
+    }
+    return { ...browserStatus(), title: await page.title(), cloudflare: cf };
   }
 
-  const cf = await waitForCloudflareClear({ timeoutMs: 180_000 });
-  if (!cf.ok) {
-    console.error(
-      "browser: still on Cloudflare after timeout — messages will not extract until you pass the check"
-    );
-  }
-
-  return { ...browserStatus(), title: await page.title(), cloudflare: cf };
+  if (!ready && lat.postNavSettleMs) await sleep(lat.postNavSettleMs);
+  return {
+    ...browserStatus(),
+    title: await page.title(),
+    cloudflare: { ok: true, waitedMs: 0, challenge: false, skipped: Boolean(ready) },
+  };
 }
 
 async function firstSelector(page, selectors) {
@@ -1010,23 +1099,23 @@ export async function browserExtractMessages({ limit = 40 } = {}) {
     "[class*='message']",
   ];
 
+  // Single evaluate pass — role nodes first, then "You said:" transcript parse.
   const messages = await page.evaluate(
     ({ selectors, roleAttr, limit }) => {
       const out = [];
       const seen = new Set();
-
       const push = (role, text) => {
         const t = (text || "").trim();
         if (!t || t.length < 2) return;
+        if (/^(latest response|loading chats|think)$/i.test(t)) return;
         const key = `${role}:${t.slice(0, 160)}`;
         if (seen.has(key)) return;
         seen.add(key);
-        out.push({ role, text: t.slice(0, 8000) });
+        out.push({ role, text: t.slice(0, 12000) });
       };
 
       for (const sel of selectors) {
-        const nodes = Array.from(document.querySelectorAll(sel));
-        for (const el of nodes) {
+        for (const el of document.querySelectorAll(sel)) {
           let role = el.getAttribute(roleAttr || "data-message-author-role");
           if (!role) {
             const named = el.querySelector?.("[data-message-author-role]");
@@ -1044,9 +1133,8 @@ export async function browserExtractMessages({ limit = 40 } = {}) {
               cls.includes("model")
             )
               role = "assistant";
-            else role = "unknown";
+            else continue;
           }
-          // Prefer inner message body over whole turn chrome
           const body =
             el.querySelector?.(".markdown, .prose, [class*='markdown']") || el;
           push(role, body.innerText || body.textContent || "");
@@ -1054,7 +1142,6 @@ export async function browserExtractMessages({ limit = 40 } = {}) {
         if (out.length) break;
       }
 
-      // Fallback: any role-tagged nodes anywhere
       if (!out.length) {
         for (const el of document.querySelectorAll("[data-message-author-role]")) {
           push(
@@ -1064,23 +1151,17 @@ export async function browserExtractMessages({ limit = 40 } = {}) {
         }
       }
 
-      // Guest / share UI often has no role attrs — parse visible turn text.
+      // Transcript labels used by several web UIs (multi-line turns).
       if (!out.length) {
-        const raw = (document.body?.innerText || "").split("\n").map((s) => s.trim()).filter(Boolean);
-        const skip = /^(log in|sign up|new chat|images|plugins|settings|help|deep research|see plans|chatgpt is ai|get responses|chat with chatgpt|stop generating)/i;
-        const turns = raw.filter((t) => t.length > 8 && !skip.test(t));
-        // Heuristic: pairs of user then assistant blobs near the end.
-        for (let i = 0; i < turns.length; i++) {
-          const t = turns[i];
-          if (/^you said|^user:/i.test(t)) push("user", t.replace(/^you said[:\s]*/i, ""));
-          else if (/^chatgpt said|^assistant:/i.test(t))
-            push("assistant", t.replace(/^(chatgpt said|assistant:)[:\s]*/i, ""));
-        }
-        if (!out.length && turns.length >= 2) {
-          push("user", turns[turns.length - 2]);
-          push("assistant", turns[turns.length - 1]);
-        } else if (!out.length && turns.length === 1) {
-          push("assistant", turns[0]);
+        const root = document.querySelector("main") || document.body;
+        const raw = (root?.innerText || "").replace(/\r/g, "");
+        const parts = raw.split(/\n(?=You said:|ChatGPT said:|Assistant:|User:)/i);
+        for (const part of parts) {
+          const t = part.trim();
+          if (!t) continue;
+          if (/^You said:/i.test(t)) push("user", t.replace(/^You said:\s*/i, ""));
+          else if (/^(ChatGPT said:|Assistant:)/i.test(t))
+            push("assistant", t.replace(/^(ChatGPT said:|Assistant:)\s*/i, ""));
         }
       }
 
@@ -1201,15 +1282,22 @@ export function createTurnSettler({ prevText = null, idleMs = 1200 } = {}) {
 
 export async function waitForAssistantTurn({
   prevText = null,
-  timeoutMs = 120_000,
-  idleMs = 1200,
-  pollMs = 400,
+  timeoutMs = null,
+  idleMs = null,
+  pollMs = null,
 } = {}) {
-  const deadline = Date.now() + Math.max(0, Number(timeoutMs) || 0);
-  const settler = createTurnSettler({ prevText, idleMs });
+  const lat = latency();
+  const budget = timeoutMs == null ? lat.assistantTimeoutMs : timeoutMs;
+  const idle = idleMs == null ? lat.assistantIdleMs : idleMs;
+  const poll = pollMs == null ? lat.assistantPollMs : pollMs;
+  const deadline = Date.now() + Math.max(0, Number(budget) || 0);
+  const settler = createTurnSettler({ prevText, idleMs: idle });
 
   while (Date.now() < deadline) {
-    const extracted = await browserExtractMessages({ limit: 50 });
+    const [extracted, generating] = await Promise.all([
+      browserExtractMessages({ limit: 30 }),
+      browserIsGenerating(),
+    ]);
     if (extracted.blocked) {
       const partial = settler.give_up();
       return partial ? { ...partial, reason: extracted.blocked } : null;
@@ -1217,15 +1305,42 @@ export async function waitForAssistantTurn({
 
     const done = settler.observe({
       text: extracted.lastAssistant?.text || null,
-      generating: await browserIsGenerating(),
+      generating,
       now: Date.now(),
     });
     if (done) return done;
 
-    await sleep(pollMs);
+    await sleep(poll);
   }
 
   return settler.give_up();
+}
+
+/**
+ * Send + wait for the next assistant turn (optimized defaults).
+ */
+export async function browserRoundTrip({
+  text,
+  submit = true,
+  timeoutMs = null,
+} = {}) {
+  const before = await browserExtractMessages({ limit: 5 });
+  const prev = before.lastAssistant?.text || null;
+  const sent = await browserSendMessage({ text, submit });
+  const turn = await waitForAssistantTurn({
+    prevText: prev,
+    timeoutMs,
+  });
+  return {
+    ok: Boolean(turn?.text),
+    sent,
+    assistant: turn?.text || null,
+    settled: Boolean(turn?.settled),
+    reason: turn?.reason || null,
+    url: browserStatus().url,
+    site: _meta.site,
+    ms: undefined,
+  };
 }
 
 async function ensureNotCloudflareOrRecover(action = "continue") {
@@ -1257,24 +1372,20 @@ export async function browserSendMessage({ text, submit = true } = {}) {
   }
   await ensureNotCloudflareOrRecover("send");
   const page = requirePage();
+  const lat = latency();
   const site = siteConfig(_meta.site);
   const composers = site?.composerSelectors || [
     "textarea",
     'div[contenteditable="true"]',
   ];
-  let composer = await firstSelector(page, composers);
-  if (!composer) {
-    // Guest ChatGPT sometimes paints the composer a beat late
-    await sleep(1500);
-    composer = await firstSelector(page, composers);
-  }
+  const composer = await waitForComposer(page, composers);
   if (!composer) {
     throw new Error(
       "Could not find chat composer on page (login wall or still loading). If you see Log in, use your normal Chrome profile via the mailnotmilk extension, or log in once in the CDP Chrome window (~/.mailnotmilk/chrome-cdp)."
     );
   }
 
-  await composer.click({ timeout: 10_000 });
+  await composer.click({ timeout: 5_000 });
   const handle = await composer.elementHandle();
   const tag = await handle.evaluate((el) => el.tagName.toLowerCase());
   if (tag === "textarea" || tag === "input") {
@@ -1290,14 +1401,13 @@ export async function browserSendMessage({ text, submit = true } = {}) {
     ];
     const sendBtn = await firstSelector(page, senders);
     if (sendBtn) {
-      await sendBtn.click({ timeout: 5000 }).catch(async () => {
+      await sendBtn.click({ timeout: 3000 }).catch(async () => {
         await page.keyboard.press("Enter");
       });
     } else {
-      // ChatGPT guest UI often submits on Enter when the send button is the mic/voice control
       await page.keyboard.press("Enter");
     }
-    await sleep(1200);
+    if (lat.postSendMs) await sleep(lat.postSendMs);
   }
 
   return { ok: true, site: _meta.site, url: page.url() };

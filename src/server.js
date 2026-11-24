@@ -596,6 +596,29 @@ export function createServer() {
   );
 
   server.tool(
+    "browser_round_trip",
+    "Send a message and wait for the next assistant reply (latency-optimized). Prefer this over send+poll loops.",
+    {
+      text: z.string(),
+      submit: z.boolean().optional(),
+      timeout_ms: z.number().int().positive().optional(),
+    },
+    async ({ text, submit, timeout_ms }) => {
+      const b = await import("./browser.js");
+      const t0 = Date.now();
+      const result = await b.browserRoundTrip({
+        text,
+        submit: submit !== false,
+        timeoutMs: timeout_ms || null,
+      });
+      return textResult({
+        ...result,
+        ms: Date.now() - t0,
+      });
+    }
+  );
+
+  server.tool(
     "browser_screenshot",
     "Screenshot the current browser page.",
     { path: z.string().optional() },

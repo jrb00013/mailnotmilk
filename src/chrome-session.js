@@ -18,6 +18,7 @@ import {
 import { join } from "node:path";
 import { homedir, platform } from "node:os";
 import http from "node:http";
+import { latency } from "./latency.js";
 
 function probe(url, timeoutMs = 400) {
   return new Promise((resolve) => {
@@ -231,7 +232,7 @@ export async function stopCdpChrome({ port = 9223, profile = null } = {}) {
       /* ignore */
     }
   }
-  await new Promise((r) => setTimeout(r, 800));
+  await new Promise((r) => setTimeout(r, latency().cdpStopWaitMs));
   return { ok: true };
 }
 
@@ -580,8 +581,9 @@ export async function ensureChromeCdp({
   });
   child.unref();
 
+  const probeMs = latency().cdpProbeMs;
   for (let i = 0; i < 100; i++) {
-    await new Promise((r) => setTimeout(r, 250));
+    await new Promise((r) => setTimeout(r, probeMs));
     if (await cdpUp(url)) {
       return {
         ok: true,
