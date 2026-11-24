@@ -20,6 +20,10 @@ import { join } from "node:path";
 import { homedir, platform, tmpdir } from "node:os";
 import { mkdtempSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
+import { latency } from "./latency.js";
+
+/** In-memory jar cache: key → { at, mtime, result } */
+const _cookieCache = new Map();
 
 /** Candidate user-data roots for daily Chrome (not mailnotmilk CDP). */
 export function findPrimaryChromeUserDataDirs() {
@@ -213,6 +217,24 @@ export function extractFirefoxCookies({ targets = [], profileDir = null } = {}) 
   }
 
   const hosts = [...new Set(targets.flatMap(hostsForTarget))];
+  const hostsKey = hosts.slice().sort().join(",") || "*";
+  let mtime = 0;
+  try {
+    mtime = statSync(dbPath).mtimeMs;
+  } catch {
+    mtime = 0;
+  }
+  const cacheKey = `ff:${prof.profileDir}:${hostsKey}`;
+  const lat = latency();
+  const hit = _cookieCache.get(cacheKey);
+  if (
+    hit &&
+    hit.mtime === mtime &&
+    Date.now() - hit.at < lat.cookieCacheTtlMs
+  ) {
+    return { ...hit.result, cached: true };
+  }
+
   const { tmp, tmpRoot } = copyDbToTemp(dbPath);
   const cookies = [];
   try {
@@ -257,7 +279,7 @@ export function extractFirefoxCookies({ targets = [], profileDir = null } = {}) 
     }
   }
 
-  return {
+  const result = {
     ok: cookies.length > 0,
     cookies,
     count: cookies.length,
@@ -265,7 +287,10 @@ export function extractFirefoxCookies({ targets = [], profileDir = null } = {}) 
     profileDir: prof.profileDir,
     hosts,
     score: scoreSessionCookies(cookies),
+    cached: false,
   };
+  _cookieCache.set(cacheKey, { at: Date.now(), mtime, result });
+  return result;
 }
 
 /** Heuristic: session/auth cookies score higher than analytics crumbs. */
