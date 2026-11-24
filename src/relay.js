@@ -84,7 +84,7 @@ function isEchoOfOutbound(history, peerId, userText) {
  */
 export async function relayTick({
   chatId = null,
-  site = "deepseek",
+  site = process.env.MAILNOTMILK_SITE || null,
   peer = "claude",
   fromBrowser = "web-ai",
   waitPeerMs = 0,
@@ -102,21 +102,28 @@ export async function relayTick({
     if (st.connected || st.lastHello) {
       await browser.browserConnect({ mode: "extension" });
     } else {
+      // True headless by default: Chrome --headless=new over CDP.
       await browser.browserConnect({
         browser: "chrome",
-        mode: "launch",
-        headless: false,
+        mode: "auto",
+        headless: process.env.MAILNOTMILK_HEADED !== "1",
       });
     }
-    await browser.browserOpenAi({ site });
+    const startUrl = process.env.MAILNOTMILK_START_URL || null;
+    if (site || startUrl) {
+      await browser.browserOpenAi({ site, url: startUrl });
+    }
   }
 
   // Follow the tab rather than the --site flag: whatever AI you navigate to is
   // the one we talk to. Only navigate when the current page is not a chat we
   // recognise, so we never yank the tab away from where you already are.
   const synced = await browser.syncSiteFromUrl();
-  if (!synced.site || synced.site === "custom") {
-    await browser.browserOpenAi({ site });
+  if ((!synced.site || synced.site === "custom") && (site || process.env.MAILNOTMILK_START_URL)) {
+    await browser.browserOpenAi({
+      site,
+      url: process.env.MAILNOTMILK_START_URL || null,
+    });
     await browser.syncSiteFromUrl();
   }
   site = browser.browserStatus().site || site;

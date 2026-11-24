@@ -42,6 +42,15 @@ export async function waitForExtension({ timeoutMs = 15000 } = {}) {
 }
 
 function siteHomeUrl(site) {
+  // Prefer browser.js site registry when available; env override; else treat
+  // `site` as a hostname/URL. No hard-coded vendor fallback.
+  try {
+    // lazy — avoid circular import at module load
+  } catch {
+    /* ignore */
+  }
+  const env = process.env.MAILNOTMILK_START_URL;
+  if (env) return env;
   const map = {
     chatgpt: "https://chatgpt.com/",
     deepseek: "https://chat.deepseek.com/",
@@ -49,14 +58,25 @@ function siteHomeUrl(site) {
     gemini: "https://gemini.google.com/app",
     copilot: "https://copilot.microsoft.com/",
   };
-  return map[site] || "https://chatgpt.com/";
+  if (map[site]) return map[site];
+  if (site && /\./.test(site)) {
+    return site.includes("://") ? site : `https://${site}`;
+  }
+  throw new Error(
+    `No start URL for site=${site}. Set MAILNOTMILK_START_URL or pass a hostname.`
+  );
 }
 
 /**
  * @param {object} opts
  */
 export async function runStack(opts = {}) {
-  const site = opts.site || process.env.MAILNOTMILK_SITE || "chatgpt";
+  const site = opts.site || process.env.MAILNOTMILK_SITE || null;
+  if (!site && !process.env.MAILNOTMILK_START_URL) {
+    throw new Error(
+      "Set --site / MAILNOTMILK_SITE (shortcut or hostname) or MAILNOTMILK_START_URL. No default vendor."
+    );
+  }
   const peer = opts.peer || process.env.MAILNOTMILK_PEER || "claude";
   const browserName =
     opts.browser || process.env.MAILNOTMILK_BROWSER || "chrome";
@@ -74,8 +94,10 @@ export async function runStack(opts = {}) {
     opts.useSession !== false &&
     process.env.MAILNOTMILK_NO_SESSION !== "1" &&
     browserName !== "firefox";
-  const cdpUrl = opts.cdpUrl || "http://127.0.0.1:9222";
-  const port = Number(new URL(cdpUrl).port || 9222);
+  const cdpUrl =
+    opts.cdpUrl ||
+    (headless ? "http://127.0.0.1:9223" : "http://127.0.0.1:9222");
+  const port = Number(new URL(cdpUrl).port || (headless ? 9223 : 9222));
 
   console.error(
     `mailnotmilk run: site=${site} peer=${peer} browser=${browserName}`
@@ -138,31 +160,32 @@ export async function runStack(opts = {}) {
       port,
       startIfMissing: opts.startChrome !== false,
       openUrl: siteHomeUrl(site),
+      headless,
     });
     if (sess.ok) {
       console.error(
-        `browser: CDP fallback ${cdpUrl}` +
-          (sess.started ? " (started Chrome)" : "")
+        `browser: CDP ${sess.cdpUrl || cdpUrl}` +
+          (sess.started ? " (started)" : "") +
+          (headless ? " [--headless=new]" : " [headed]")
       );
       await browser.browserConnect({
         browser: "chrome",
         mode: "cdp",
-        cdpUrl,
+        cdpUrl: sess.cdpUrl || cdpUrl,
+        headless,
       });
       attached = true;
     }
   }
 
   if (!attached) {
-    const forceHeaded = site === "chatgpt" || process.env.MAILNOTMILK_HEADED === "1";
-    const launchHeadless = forceHeaded ? false : headless;
     console.error(
-      `browser: Playwright fallback (${launchHeadless ? "headless" : "headed"})`
+      `browser: Playwright fallback (${headless ? "headless" : "headed"})`
     );
     await browser.browserConnect({
       browser: browserName === "firefox" ? "firefox" : "chrome",
       mode: "launch",
-      headless: launchHeadless,
+      headless,
     });
   }
 

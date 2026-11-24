@@ -13,6 +13,8 @@ let _pw = null;
 let _browser = null;
 let _context = null;
 let _page = null;
+let _cfRecovering = false;
+let _cfHealAttempts = 0;
 let _meta = {
   browser: null,
   site: null,
@@ -21,6 +23,8 @@ let _meta = {
   tabId: null,
   extensionStatus: null,
   extensionSeen: false,
+  headless: false,
+  headlessMode: null,
 };
 
 /**
@@ -310,6 +314,10 @@ export function browserStatus() {
     cdp: _meta.cdp,
     mode: _meta.mode,
     tabId: _meta.tabId,
+    headless: Boolean(_meta.headless),
+    headlessMode: _meta.headlessMode || null,
+    cdpUrl: _meta.cdpUrl || null,
+    primaryCookies: _meta.primaryCookies || null,
     extension: _meta.extensionStatus || {
       connected: false,
       lastHello: null,
@@ -349,23 +357,35 @@ export async function resolveBrowserConnectMode({
       const { ensureChromeCdp } = await import("./chrome-session.js");
       return ensureChromeCdp(opts);
     });
+  // Prefer true headless=new CDP (system Chrome) unless MAILNOTMILK_HEADED=1.
+  const preferHeadless = process.env.MAILNOTMILK_HEADED !== "1";
   const sess = await ensureFn({
-    cdpUrl,
+    cdpUrl: preferHeadless
+      ? cdpUrl.replace(/:9222\b/, ":9223") || "http://127.0.0.1:9223"
+      : cdpUrl,
     startIfMissing: true,
-    openUrl: "https://chatgpt.com/",
+    openUrl: process.env.MAILNOTMILK_START_URL || null,
+    headless: preferHeadless,
   });
   if (sess.ok) {
     return {
       mode: "cdp",
-      reason: sess.started ? "cdp-started" : "cdp-existing",
+      reason: sess.started
+        ? preferHeadless
+          ? "cdp-headless-started"
+          : "cdp-started"
+        : "cdp-existing",
       cdp: sess,
+      headless: preferHeadless,
+      headlessMode: sess.headlessMode || null,
     };
   }
 
   return {
     mode: "launch",
-    reason: "playwright-headed-fallback",
+    reason: preferHeadless ? "playwright-headless-fallback" : "playwright-headed-fallback",
     cdpError: sess.error || null,
+    headless: preferHeadless,
   };
 }
 
@@ -373,7 +393,7 @@ export async function browserConnect({
   browser = "chrome",
   mode = "launch",
   cdpUrl = "http://127.0.0.1:9222",
-  headless = false,
+  headless = process.env.MAILNOTMILK_HEADED !== "1",
   profileDir = null,
 } = {}) {
   await browserDisconnect();
@@ -435,32 +455,78 @@ export async function browserConnect({
     if (name !== "chromium") {
       throw new Error("CDP attach is Chromium/Chrome only; use mode=launch for Firefox");
     }
-    const { ensureChromeCdp } = await import("./chrome-session.js");
+    const { ensureChromeCdp, resolveHeadlessMode } = await import("./chrome-session.js");
+    const headlessMode = resolveHeadlessMode(headless);
     const sess = await ensureChromeCdp({
       cdpUrl,
       startIfMissing: true,
-      openUrl: "https://chatgpt.com/",
+      openUrl: process.env.MAILNOTMILK_START_URL || null,
+      headless: headless === false ? false : headless === true ? true : headless,
+      forceRestart: false,
     });
     if (!sess.ok) {
       throw new Error(
-        `CDP not available (${sess.error || "unknown"}). Start Chrome with --remote-debugging-port=9222 or install Google Chrome.`
+        `CDP not available (${sess.error || "unknown"}). Install Google Chrome.`
       );
     }
-    _browser = await pw.chromium.connectOverCDP(cdpUrl);
+    const attachUrl = sess.cdpUrl || cdpUrl;
+    _browser = await pw.chromium.connectOverCDP(attachUrl);
     const contexts = _browser.contexts();
     _context = contexts[0] || (await _browser.newContext());
+    const { applyStealthToContext } = await import("./stealth.js");
+    await applyStealthToContext(_context);
+    // Pull live session cookies from Firefox/Chrome for known page targets only
+    // (avoid dumping the entire jar when we don't know the site yet).
+    if (process.env.MAILNOTMILK_IMPORT_PRIMARY !== "0") {
+      try {
+        const {
+          extractPrimaryCookies,
+          injectCookiesIntoContext,
+        } = await import("./primary-browser.js");
+        const targets = [
+          process.env.MAILNOTMILK_START_URL,
+          ...(_context.pages() || []).map((p) => p.url()).filter((u) => /^https?:/i.test(u)),
+        ].filter(Boolean);
+        if (targets.length) {
+          const jar = extractPrimaryCookies({ targets });
+          if (jar.ok && jar.cookies?.length) {
+            const inj = await injectCookiesIntoContext(_context, jar.cookies);
+            _meta.primaryCookies = {
+              browser: jar.browser,
+              injected: inj.injected,
+              score: jar.score,
+              profileDir: jar.profileDir,
+            };
+            console.error(
+              `browser: injected ${inj.injected} cookies from primary ${jar.browser} (${jar.profileDir})`
+            );
+          } else {
+            _meta.primaryCookies = {
+              ok: false,
+              error: jar.error,
+              candidates: jar.candidates,
+            };
+          }
+        }
+      } catch (err) {
+        console.error(`browser: primary cookie inject error: ${err.message}`);
+      }
+    }
     const pages = _context.pages();
-    // Prefer an existing ChatGPT tab if present
     _page =
       pages.find((pg) => isKnownSiteUrl(pg.url())) ||
-      pages[0] ||
-      (await _context.newPage());
+      pages.find((pg) => /^https?:/i.test(pg.url())) ||
+      null;
+    if (!_page) _page = await _context.newPage();
+    _meta.headless = headlessMode !== "headed";
+    _meta.headlessMode = sess.headlessMode || headlessMode;
+    _meta.browser = "chrome";
+    _meta.cdpUrl = attachUrl;
   } else {
     ensureDataDir();
     const userDataDir =
       profileDir || join(dataDir(), "browser-profiles", name);
     mkdirSync(userDataDir, { recursive: true });
-    // Headless trips Cloudflare on chatgpt.com — default headed.
     const launchHeadless = Boolean(headless);
     const launchOpts = {
       headless: launchHeadless,
@@ -470,10 +536,11 @@ export async function browserConnect({
       // No Chromium switches here. Firefox treats an unrecognised argument as a
       // URL, so passing --disable-blink-features=AutomationControlled made it
       // open a tab to "http://automationcontrolled/" on every launch.
+      // Mozilla headless is first-class: `firefox --headless` / Playwright headless.
       _context = await pw.firefox.launchPersistentContext(userDataDir, launchOpts);
     } else {
       launchOpts.args = ["--disable-blink-features=AutomationControlled"];
-      // System Chrome — Cloudflare blocks Playwright's bundled Chromium hard
+      // System Chrome channel — uses Chromium's headless=new when headless:true
       try {
         _context = await pw.chromium.launchPersistentContext(userDataDir, {
           ...launchOpts,
@@ -481,32 +548,17 @@ export async function browserConnect({
         });
         _meta.browser = "chrome";
       } catch (err) {
-        if (launchHeadless) {
-          // Last resort: don't stay headless on missing channel — try headed system chrome
-          try {
-            _context = await pw.chromium.launchPersistentContext(userDataDir, {
-              ...launchOpts,
-              headless: false,
-              channel: "chrome",
-            });
-            _meta.browser = "chrome";
-            _meta.headless = false;
-          } catch {
-            throw new Error(
-              `Could not launch system Chrome (${err.message}). Install Google Chrome, or run: npx playwright install chromium`
-            );
-          }
-        } else {
-          try {
-            _context = await pw.chromium.launchPersistentContext(userDataDir, launchOpts);
-          } catch (err2) {
-            throw new Error(
-              `Could not launch browser (${err2.message}). Install Google Chrome or: npx playwright install chromium`
-            );
-          }
+        try {
+          _context = await pw.chromium.launchPersistentContext(userDataDir, launchOpts);
+        } catch (err2) {
+          throw new Error(
+            `Could not launch browser (${err2.message || err.message}). Install Google Chrome or: npx playwright install chromium`
+          );
         }
       }
     }
+    const { applyStealthToContext } = await import("./stealth.js");
+    await applyStealthToContext(_context);
     _browser = _context.browser();
     _page = _context.pages()[0] || (await _context.newPage());
   }
@@ -514,46 +566,168 @@ export async function browserConnect({
   return browserStatus();
 }
 
+function shouldAttemptCfRecovery() {
+  if (_cfRecovering) return false;
+  if (_cfHealAttempts >= 2) return false;
+  // Already on invisible Xvfb warm — don't loop.
+  if (_meta.headlessMode === "offscreen") return false;
+  if (_meta.headlessMode === "headed") return false;
+  return Boolean(_meta.headless) || _meta.mode === "launch" || _meta.headlessMode === "new";
+}
+
+async function attachChatgptPage(openUrl) {
+  if (!_context) return null;
+  let page =
+    _context.pages().find((pg) => isKnownSiteUrl(pg.url())) ||
+    _context.pages().find((pg) => /^https?:/i.test(pg.url())) ||
+    null;
+  if (!page) page = await _context.newPage();
+  if (!isKnownSiteUrl(page.url())) {
+    await page.goto(openUrl, { waitUntil: "domcontentloaded", timeout: 60_000 }).catch(() => {});
+  }
+  _page = page;
+  return page;
+}
+
 /**
- * If Cloudflare is blocking a headless/playwright session, bounce to a real
- * Chrome CDP window the human (or a one-click) can clear.
+ * Automated CF heal — never pops a window on the user desktop:
+ * 1) Xvfb warm → `--headless=new`
+ * 2) If CF still blocks, stay on Xvfb headed (invisible) and continue
  */
 export async function recoverBrowserForCloudflare({
-  cdpUrl = "http://127.0.0.1:9222",
+  cdpUrl = "http://127.0.0.1:9223",
   site = null,
 } = {}) {
-  const wasHeadless = Boolean(_meta.headless) || _meta.mode === "launch";
-  console.error(
-    "browser: Cloudflare block — reconnecting via headed Chrome CDP (not headless Playwright)"
-  );
-  await browserDisconnect();
-  const { ensureChromeCdp } = await import("./chrome-session.js");
-  const openUrl =
-    (site && allSites()[site]?.url) ||
-    "https://chatgpt.com/";
-  const sess = await ensureChromeCdp({
-    cdpUrl,
-    startIfMissing: true,
-    openUrl,
-  });
-  if (!sess.ok) {
+  if (_cfRecovering) {
     return {
       ok: false,
-      error: sess.error || "could not start Chrome CDP for Cloudflare recovery",
-      wasHeadless,
+      error: "CF auto-heal already running",
+      wasHeadless: Boolean(_meta.headless),
     };
   }
-  const status = await browserConnect({
-    browser: "chrome",
-    mode: "cdp",
-    cdpUrl,
-    headless: false,
-  });
-  if (site || openUrl) {
-    await browserOpenAi({ site: site || "chatgpt", url: openUrl }).catch(() => {});
+  _cfRecovering = true;
+  _cfHealAttempts += 1;
+  const wasHeadless = Boolean(_meta.headless) || _meta.mode === "launch";
+  try {
+    const openUrl =
+      (site && allSites()[site]?.url) ||
+      _page?.url?.() ||
+      process.env.MAILNOTMILK_START_URL ||
+      "about:blank";
+    const recoverUrl = String(cdpUrl || _meta.cdpUrl || "http://127.0.0.1:9223").replace(
+      /:9222\b/,
+      ":9223"
+    );
+
+    await browserDisconnect();
+    const { ensureTrueHeadlessCdp, ensureChromeCdp } = await import("./chrome-session.js");
+
+    const sess = await ensureTrueHeadlessCdp({
+      cdpUrl: recoverUrl,
+      openUrl,
+      waitCfMs: 60_000,
+      checkCfFn: async ({ cdpUrl: warmUrl, timeoutMs }) => {
+        const pw = await loadPlaywright();
+        let browser = null;
+        try {
+          browser = await pw.chromium.connectOverCDP(warmUrl);
+          const ctx = browser.contexts()[0] || (await browser.newContext());
+          let page =
+            ctx.pages().find((pg) => isKnownSiteUrl(pg.url())) ||
+            ctx.pages().find((pg) => /^https?:/i.test(pg.url())) ||
+            (await ctx.newPage());
+          if (!isKnownSiteUrl(page.url())) {
+            await page.goto(openUrl, {
+              waitUntil: "domcontentloaded",
+              timeout: 60_000,
+            });
+          }
+          const start = Date.now();
+          while (Date.now() - start < timeoutMs) {
+            const title = await page.title().catch(() => "");
+            const body = await page
+              .evaluate(() => (document.body?.innerText || "").slice(0, 800))
+              .catch(() => "");
+            const blocked =
+              /just a moment|verify you are human|attention required|cf-challenge/i.test(
+                `${title} ${body}`
+              );
+            if (!blocked) return { ok: true, waitedMs: Date.now() - start };
+            await sleep(1500);
+          }
+          return { ok: false, error: "warm CF timeout" };
+        } catch (err) {
+          return { ok: false, error: err.message };
+        } finally {
+          try {
+            await browser?.close();
+          } catch {
+            /* ignore */
+          }
+        }
+      },
+    });
+
+    if (!sess.ok) {
+      return {
+        ok: false,
+        error: sess.error || "automated headless CF heal failed",
+        stage: sess.stage,
+        wasHeadless,
+      };
+    }
+
+    let status = await browserConnect({
+      browser: "chrome",
+      mode: "cdp",
+      cdpUrl: sess.cdpUrl || recoverUrl,
+      headless: "new",
+    });
+    await attachChatgptPage(openUrl);
+    _meta.site = site || "chatgpt";
+    await sleep(1500);
+
+    let stillCf = await isCloudflareChallenge().catch(() => true);
+    if (stillCf) {
+      // Stay invisible on Xvfb — never ask a human to click, never use user DISPLAY.
+      console.error(
+        "browser: CF/auto — --headless=new still challenged; staying on Xvfb (your screen stays empty)"
+      );
+      await browserDisconnect();
+      const warm = await ensureChromeCdp({
+        cdpUrl: recoverUrl,
+        startIfMissing: true,
+        openUrl,
+        headless: "offscreen",
+        forceRestart: true,
+      });
+      if (!warm.ok) {
+        return { ok: false, error: warm.error || "xvfb stay failed", wasHeadless };
+      }
+      status = await browserConnect({
+        browser: "chrome",
+        mode: "cdp",
+        cdpUrl: warm.cdpUrl || recoverUrl,
+        headless: "offscreen",
+      });
+      await attachChatgptPage(openUrl);
+      _meta.site = site || "chatgpt";
+      await sleep(1500);
+      stillCf = await isCloudflareChallenge().catch(() => true);
+    }
+
+    return {
+      ok: !stillCf,
+      status,
+      cloudflare: { ok: !stillCf, challenge: stillCf },
+      recovered: true,
+      headlessMode: _meta.headlessMode,
+      automated: true,
+      wasHeadless,
+    };
+  } finally {
+    _cfRecovering = false;
   }
-  const cf = await waitForCloudflareClear({ timeoutMs: 180_000 });
-  return { ok: cf.ok, status, cloudflare: cf, recovered: true, wasHeadless };
 }
 
 export async function browserDisconnect() {
@@ -632,7 +806,7 @@ export async function waitForCloudflareClear({ timeoutMs = 180_000 } = {}) {
     let challenge = await isCloudflareChallenge();
     if (!challenge) return { ok: true, waitedMs: 0, challenge: false };
     console.error(
-      "browser: Cloudflare challenge in your Chrome tab — click Verify you are human."
+      "browser: Cloudflare challenge in extension tab — waiting for auto-clear / prior login cookies."
     );
     while (Date.now() - start < timeoutMs) {
       await sleep(1500);
@@ -648,7 +822,9 @@ export async function waitForCloudflareClear({ timeoutMs = 180_000 } = {}) {
   if (!challenge) return { ok: true, waitedMs: 0, challenge: false };
 
   console.error(
-    "browser: Cloudflare challenge detected — click “Verify you are human” in the Chrome window."
+    _meta.headless || _meta.headlessMode === "offscreen" || _meta.headlessMode === "new"
+      ? "browser: Cloudflare challenge — waiting for automated clear (no desktop window)."
+      : "browser: Cloudflare challenge detected — waiting for clear."
   );
   while (Date.now() - start < timeoutMs) {
     await sleep(1500);
@@ -670,12 +846,12 @@ export async function waitForCloudflareClear({ timeoutMs = 180_000 } = {}) {
   return { ok: false, waitedMs: Date.now() - start, challenge: true };
 }
 
-export async function browserOpenAi({ site = "deepseek", url = null } = {}) {
+export async function browserOpenAi({ site = null, url = null } = {}) {
   let target = url;
   let siteKey = site;
   if (!target) {
     // A site key with no URL may still be a bare hostname the caller typed.
-    const cfg = allSites()[site];
+    const cfg = site ? allSites()[site] : null;
     if (cfg?.url) {
       target = cfg.url;
       siteKey = site;
@@ -684,13 +860,44 @@ export async function browserOpenAi({ site = "deepseek", url = null } = {}) {
       siteKey = detectSiteFromUrl(target) || "custom";
     } else {
       throw new Error(
-        `Unknown site ${site}. Known: ${listSites().join(", ")} — or pass a URL.`
+        `Pass site= (known: ${listSites().join(", ")}) or url= (any https chat). No default vendor URL.`
       );
     }
   } else {
     // Any URL is allowed. Recognise it when we can so the tuned selectors
     // apply; otherwise "custom" falls back to GENERIC, which still works.
     siteKey = detectSiteFromUrl(target) || site || "custom";
+  }
+
+  // Re-inject primary cookies for this target host right before navigation
+  // (Firefox session tokens, etc.) — site-agnostic.
+  if (
+    _context &&
+    _meta.mode !== "extension" &&
+    process.env.MAILNOTMILK_IMPORT_PRIMARY !== "0"
+  ) {
+    try {
+      const {
+        extractPrimaryCookies,
+        injectCookiesIntoContext,
+      } = await import("./primary-browser.js");
+      const jar = extractPrimaryCookies({ targets: [target] });
+      if (jar.ok && jar.cookies?.length) {
+        const inj = await injectCookiesIntoContext(_context, jar.cookies);
+        _meta.primaryCookies = {
+          browser: jar.browser,
+          injected: inj.injected,
+          score: jar.score,
+          profileDir: jar.profileDir,
+          target,
+        };
+        console.error(
+          `browser: refreshed ${inj.injected} primary ${jar.browser} cookies for ${target}`
+        );
+      }
+    } catch (err) {
+      console.error(`browser: cookie refresh error: ${err.message}`);
+    }
   }
 
   if (_meta.mode === "extension") {
@@ -721,13 +928,14 @@ export async function browserOpenAi({ site = "deepseek", url = null } = {}) {
   _meta.site = siteKey;
 
   if (await isCloudflareChallenge()) {
-    if (_meta.headless || _meta.mode === "launch") {
+    if (shouldAttemptCfRecovery()) {
       const recovery = await recoverBrowserForCloudflare({ site: siteKey });
       return {
         ...browserStatus(),
         title: _page ? await _page.title().catch(() => null) : null,
         cloudflare: recovery.cloudflare || { ok: recovery.ok },
         recovered: Boolean(recovery.recovered),
+        headlessMode: _meta.headlessMode,
       };
     }
   }
@@ -775,7 +983,7 @@ export async function browserExtractMessages({ limit = 40 } = {}) {
 
   const page = requirePage();
   if (await isCloudflareChallenge()) {
-    if (_meta.headless || _meta.mode === "launch") {
+    if (shouldAttemptCfRecovery()) {
       const recovery = await recoverBrowserForCloudflare({ site: _meta.site });
       if (recovery.ok && !(await isCloudflareChallenge())) {
         return browserExtractMessages({ limit });
@@ -790,7 +998,7 @@ export async function browserExtractMessages({ limit = 40 } = {}) {
       lastUser: null,
       blocked: "cloudflare",
       error:
-        "Cloudflare challenge is showing — click Verify you are human in the Chrome window (CDP profile), then retry. Avoid headless launch for ChatGPT.",
+        "Cloudflare challenge is showing. Default is Chrome --headless=new; auto-recovery uses offscreen headed CDP. If a Verify prompt remains, set MAILNOTMILK_HEADED=1 once to clear it.",
     };
   }
 
@@ -853,6 +1061,26 @@ export async function browserExtractMessages({ limit = 40 } = {}) {
             el.getAttribute("data-message-author-role") || "unknown",
             el.innerText || el.textContent || ""
           );
+        }
+      }
+
+      // Guest / share UI often has no role attrs — parse visible turn text.
+      if (!out.length) {
+        const raw = (document.body?.innerText || "").split("\n").map((s) => s.trim()).filter(Boolean);
+        const skip = /^(log in|sign up|new chat|images|plugins|settings|help|deep research|see plans|chatgpt is ai|get responses|chat with chatgpt|stop generating)/i;
+        const turns = raw.filter((t) => t.length > 8 && !skip.test(t));
+        // Heuristic: pairs of user then assistant blobs near the end.
+        for (let i = 0; i < turns.length; i++) {
+          const t = turns[i];
+          if (/^you said|^user:/i.test(t)) push("user", t.replace(/^you said[:\s]*/i, ""));
+          else if (/^chatgpt said|^assistant:/i.test(t))
+            push("assistant", t.replace(/^(chatgpt said|assistant:)[:\s]*/i, ""));
+        }
+        if (!out.length && turns.length >= 2) {
+          push("user", turns[turns.length - 2]);
+          push("assistant", turns[turns.length - 1]);
+        } else if (!out.length && turns.length === 1) {
+          push("assistant", turns[0]);
         }
       }
 
@@ -1003,8 +1231,8 @@ export async function waitForAssistantTurn({
 async function ensureNotCloudflareOrRecover(action = "continue") {
   if (!(await isCloudflareChallenge())) return { recovered: false };
 
-  // Headless / bundled Chromium almost always fails CF — bounce to real Chrome.
-  if (_meta.mode !== "extension" && (_meta.headless || _meta.mode === "launch")) {
+  // --headless=new / Playwright launch often fails CF — bounce to offscreen headed.
+  if (_meta.mode !== "extension" && shouldAttemptCfRecovery()) {
     const recovery = await recoverBrowserForCloudflare({ site: _meta.site });
     if (recovery.ok && !(await isCloudflareChallenge())) {
       return { recovered: true, recovery };
@@ -1015,7 +1243,7 @@ async function ensureNotCloudflareOrRecover(action = "continue") {
   if (cf.ok) return { recovered: false, waited: cf };
 
   throw new Error(
-    `Cloudflare challenge is blocking ${action}. A headed Chrome window should be open — click “Verify you are human”, then retry. Prefer mode=cdp (auto-started) over headless launch.`
+    `Cloudflare challenge is blocking ${action}. A headed Chrome CDP window should be open — click “Verify you are human”, then retry. Steady-state default is Chrome --headless=new via CDP.`
   );
 }
 
@@ -1082,6 +1310,91 @@ export async function browserScreenshot({ path = null } = {}) {
   mkdirSync(join(dataDir(), "captures"), { recursive: true });
   await page.screenshot({ path: out, fullPage: false });
   return { path: out, url: page.url() };
+}
+
+/**
+ * Inventory chats / history visible in the current browser AI sidebar.
+ * Site-agnostic — scrapes nav/aside links; works for ChatGPT, Claude, etc.
+ */
+export async function browserListChats({ limit = 50 } = {}) {
+  if (_meta.mode === "extension") {
+    try {
+      const data = await ext.extEval({
+        tabId: _meta.tabId,
+        code: `(() => {
+          const chats = [];
+          const seen = new Set();
+          for (const a of document.querySelectorAll('a[href], [role="listitem"] a, nav a, aside a')) {
+            const href = a.href || a.getAttribute('href') || '';
+            const text = (a.innerText || a.textContent || '').trim().replace(/\\s+/g, ' ');
+            if (!text || text.length < 2) continue;
+            const key = href + '|' + text.slice(0, 80);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            if (/\\/(c|chat|g|project)\\//i.test(href) || /history|conversation/i.test(a.className || '')) {
+              chats.push({ title: text.slice(0, 160), href: href.slice(0, 300) });
+            }
+          }
+          const body = (document.body && document.body.innerText || '').slice(0, 500);
+          return {
+            chats: chats.slice(0, ${Math.min(Math.max(Number(limit) || 50, 1), 100)}),
+            loggedIn: !/sign up for free/i.test(body) && !/^\\s*log in\\b/im.test(body.slice(0, 200)),
+            url: location.href,
+          };
+        })()`,
+      });
+      return { site: _meta.site, ...(data || { chats: [] }) };
+    } catch (err) {
+      return { site: _meta.site, chats: [], error: err.message };
+    }
+  }
+
+  const page = requirePage();
+  const max = Math.min(Math.max(Number(limit) || 50, 1), 100);
+  const data = await page.evaluate((maxN) => {
+    const chats = [];
+    const seen = new Set();
+    const push = (title, href) => {
+      const t = (title || "").trim().replace(/\s+/g, " ");
+      if (!t || t.length < 2) return;
+      const key = `${href}|${t.slice(0, 80)}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      chats.push({ title: t.slice(0, 160), href: (href || "").slice(0, 300) });
+    };
+
+    for (const a of document.querySelectorAll(
+      'a[href*="/c/"], a[href*="/chat/"], a[href*="/g/"], a[href*="conversation"], nav a, aside a, [data-testid*="history"] a'
+    )) {
+      const href = a.href || "";
+      if (/\/(c|chat|g|project)\//i.test(href) || /history|conversation/i.test(a.getAttribute("data-testid") || "")) {
+        push(a.innerText || a.textContent, href);
+      }
+    }
+
+    // Claude / Gemini often use buttons or divs in a history rail
+    for (const el of document.querySelectorAll(
+      '[data-testid="history-item"], [class*="conversation"], [class*="History"] a, [class*="history"] a'
+    )) {
+      const a = el.tagName === "A" ? el : el.querySelector?.("a") || el;
+      push(a.innerText || a.textContent, a.href || "");
+    }
+
+    const body = (document.body?.innerText || "").slice(0, 800);
+    const guest =
+      /sign up for free/i.test(body) ||
+      (/^\s*log in\b/im.test(body.slice(0, 300)) && /sign up/i.test(body));
+    return {
+      chats: chats.slice(0, maxN),
+      count: Math.min(chats.length, maxN),
+      loggedIn: !guest,
+      guest,
+      url: location.href,
+      title: document.title,
+    };
+  }, max);
+
+  return { site: _meta.site, ...data };
 }
 
 export { SITES };
