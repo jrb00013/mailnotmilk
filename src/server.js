@@ -492,7 +492,7 @@ export function createServer() {
 
   server.tool(
     "browser_connect",
-    "Connect to browser AI. Auto: extension → headless CDP (default offscreen real Chrome; MAILNOTMILK_HEADLESS_MODE=new for --headless=new) → Playwright. MAILNOTMILK_HEADED=1 for a visible window.",
+    "Connect to browser AI. Auto: extension → true Chrome --headless=new CDP (:9223) with automated CF warm→relaunch → Playwright. MAILNOTMILK_HEADED=1 for a visible window.",
     {
       browser: z.enum(["chrome", "firefox"]).optional(),
       mode: z.enum(["auto", "extension", "launch", "cdp"]).optional(),
@@ -503,7 +503,7 @@ export function createServer() {
       headless: z
         .boolean()
         .optional()
-        .describe("Default true (offscreen headed CDP). Set MAILNOTMILK_HEADLESS_MODE=new for Chromium --headless=new."),
+        .describe("Default true = Chromium --headless=new. CF is auto-healed (offscreen warm → seed → relaunch headless=new)."),
     },
     async ({ browser, mode, cdp_url, headless }) => {
       const b = await import("./browser.js");

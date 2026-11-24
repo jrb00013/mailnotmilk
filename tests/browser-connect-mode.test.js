@@ -55,6 +55,7 @@ describe("resolveBrowserConnectMode", () => {
     assert.equal(seen.headless, true);
     assert.match(seen.cdpUrl, /9223/);
     assert.match(picked.reason, /cdp-headless/);
+    assert.equal(seen.headless, true);
   });
 
   it("honors explicit mode", async () => {

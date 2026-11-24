@@ -200,20 +200,191 @@ function parsePort(cdpUrl, fallback = 9222) {
 
 /**
  * Resolve how "headless" should launch:
- * - `new`      → Chromium `--headless=new` (true headless; may trip CF cold)
- * - `offscreen`→ real headed Chrome parked off-screen (passes CF; no visible UI)
+ * - `new`      → Chromium `--headless=new` (true headless — default)
+ * - `offscreen`→ real headed Chrome parked off-screen (CF warm helper only)
  *
- * Default: `offscreen` (real Chrome, window parked off-screen — survives CF).
- * Set MAILNOTMILK_HEADLESS_MODE=new for Chromium `--headless=new`.
+ * Default: `new`. Set MAILNOTMILK_HEADLESS_MODE=offscreen to stay offscreen.
  */
 export function resolveHeadlessMode(headless) {
   if (headless === false || headless === "headed") return "headed";
   if (headless === "offscreen") return "offscreen";
   if (headless === "new") return "new";
   if (!headless) return "headed";
-  const env = (process.env.MAILNOTMILK_HEADLESS_MODE || "offscreen").toLowerCase();
-  if (env === "new" || env === "headless=new" || env === "headless-new") return "new";
-  return "offscreen";
+  const env = (process.env.MAILNOTMILK_HEADLESS_MODE || "new").toLowerCase();
+  if (env === "offscreen" || env === "headed-offscreen") return "offscreen";
+  return "new";
+}
+
+/** Kill Chrome CDP listeners on a port (and matching user-data-dir processes). */
+export async function stopCdpChrome({ port = 9223, profile = null } = {}) {
+  try {
+    execSync(`fuser -k ${port}/tcp`, { stdio: "ignore" });
+  } catch {
+    /* nothing listening */
+  }
+  if (profile) {
+    try {
+      execSync(`pkill -f ${JSON.stringify(`--user-data-dir=${profile}`)}`, {
+        stdio: "ignore",
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+  await new Promise((r) => setTimeout(r, 800));
+  return { ok: true };
+}
+
+const XVFB_DISPLAY = process.env.MAILNOTMILK_XVFB_DISPLAY || ":97";
+let _xvfbProc = null;
+
+/**
+ * Private Xvfb — headed Chrome can warm CF here without ever touching the
+ * user's real DISPLAY (no popup on your desktop).
+ */
+export async function ensureVirtualDisplay() {
+  if (process.env.MAILNOTMILK_NO_XVFB === "1") {
+    return { ok: false, error: "MAILNOTMILK_NO_XVFB=1" };
+  }
+  try {
+    execSync(`xdpyinfo -display ${XVFB_DISPLAY}`, { stdio: "ignore" });
+    return { ok: true, display: XVFB_DISPLAY, started: false };
+  } catch {
+    /* need start */
+  }
+  const xvfb = execSync("command -v Xvfb || true", { encoding: "utf8" }).trim();
+  if (!xvfb) {
+    return { ok: false, error: "Xvfb not installed (apt install xvfb)" };
+  }
+  console.error(`browser: starting Xvfb ${XVFB_DISPLAY} (invisible warm display)`);
+  _xvfbProc = spawn(
+    xvfb,
+    [XVFB_DISPLAY, "-screen", "0", "1400x900x24", "-ac", "-nolisten", "tcp"],
+    { detached: true, stdio: "ignore" }
+  );
+  _xvfbProc.unref();
+  for (let i = 0; i < 40; i++) {
+    await new Promise((r) => setTimeout(r, 150));
+    try {
+      execSync(`xdpyinfo -display ${XVFB_DISPLAY}`, { stdio: "ignore" });
+      return { ok: true, display: XVFB_DISPLAY, started: true, pid: _xvfbProc.pid };
+    } catch {
+      /* wait */
+    }
+  }
+  return { ok: false, error: "Xvfb failed to start", display: XVFB_DISPLAY };
+}
+
+/**
+ * Automated CF pipeline — never pops a window on the user desktop:
+ * 1) Headed Chrome on private Xvfb display (invisible) until CF clears
+ * 2) Seed cookies into headless profile
+ * 3) Relaunch with true `--headless=new`
+ */
+export async function ensureTrueHeadlessCdp({
+  cdpUrl = "http://127.0.0.1:9223",
+  openUrl = "https://chatgpt.com/",
+  waitCfMs = 90_000,
+  checkCfFn = null,
+} = {}) {
+  const listenPort = parsePort(cdpUrl, 9223);
+  const url = `http://127.0.0.1:${listenPort}`;
+
+  await stopCdpChrome({ port: listenPort, profile: cdpProfileDir(false) });
+  await stopCdpChrome({ port: listenPort, profile: cdpProfileDir(true) });
+
+  const xvfb = await ensureVirtualDisplay();
+  if (!xvfb.ok) {
+    // No Xvfb — stay pure --headless=new (never spawn headed on user DISPLAY).
+    console.error(
+      `browser: CF/auto — no Xvfb (${xvfb.error}); launching --headless=new only (no desktop popup)`
+    );
+    const headlessOnly = await ensureChromeCdp({
+      cdpUrl: url,
+      port: listenPort,
+      startIfMissing: true,
+      openUrl,
+      headless: "new",
+      forceRestart: true,
+    });
+    return {
+      ...headlessOnly,
+      headlessMode: "new",
+      headless: true,
+      warmed: false,
+      xvfb: false,
+    };
+  }
+
+  console.error(
+    `browser: CF/auto — warming Chrome on Xvfb ${xvfb.display} (your screen stays empty)…`
+  );
+  const warm = await ensureChromeCdp({
+    cdpUrl: url,
+    port: listenPort,
+    startIfMissing: true,
+    openUrl,
+    headless: "offscreen",
+    forceRestart: true,
+    display: xvfb.display,
+  });
+  if (!warm.ok) {
+    return { ok: false, stage: "warm", error: warm.error || "warm failed", cdpUrl: url };
+  }
+
+  if (typeof checkCfFn === "function") {
+    const cleared = await checkCfFn({ cdpUrl: url, timeoutMs: waitCfMs });
+    if (!cleared?.ok) {
+      return {
+        ok: false,
+        stage: "warm-cf",
+        error: cleared?.error || "Cloudflare did not clear during automated warm",
+        cdpUrl: url,
+        warm,
+      };
+    }
+  } else {
+    await new Promise((r) => setTimeout(r, Math.min(waitCfMs, 12_000)));
+  }
+
+  const seeded = seedHeadlessProfileFromHeaded({ force: true });
+  console.error(
+    `browser: CF/auto — seeded headless profile (${seeded.reason || "?"}); relaunching --headless=new`
+  );
+
+  await stopCdpChrome({ port: listenPort, profile: warm.profile || cdpProfileDir(false) });
+  await stopCdpChrome({ port: listenPort, profile: cdpProfileDir(true) });
+
+  const headless = await ensureChromeCdp({
+    cdpUrl: url,
+    port: listenPort,
+    startIfMissing: true,
+    openUrl,
+    headless: "new",
+    forceRestart: true,
+  });
+  if (!headless.ok) {
+    return {
+      ok: false,
+      stage: "headless-new",
+      error: headless.error || "headless=new failed to start",
+      cdpUrl: url,
+      seeded,
+    };
+  }
+
+  return {
+    ok: true,
+    cdpUrl: headless.cdpUrl || url,
+    headlessMode: "new",
+    headless: true,
+    seeded,
+    warmed: true,
+    xvfb: xvfb.display,
+    started: true,
+    bin: headless.bin,
+    profile: headless.profile,
+  };
 }
 
 /**
@@ -227,6 +398,8 @@ export async function ensureChromeCdp({
   openUrl = "https://chatgpt.com/",
   headless = false,
   forceRestart = false,
+  /** Override DISPLAY. Offscreen never uses the user desktop — Xvfb only. */
+  display = null,
 } = {}) {
   const mode = resolveHeadlessMode(headless);
   const wantsIsolated = mode === "new" || mode === "offscreen";
@@ -241,14 +414,31 @@ export async function ensureChromeCdp({
   const url = base.replace(/:\d+/, `:${listenPort}`);
 
   if (!forceRestart && (await cdpUp(url))) {
-    return {
-      ok: true,
-      cdpUrl: url,
-      started: false,
-      bin: null,
-      headless: wantsIsolated,
-      headlessMode: mode,
-    };
+    let runningHeadlessNew = false;
+    try {
+      const out = execSync(`pgrep -af 'remote-debugging-port=${listenPort}'`, {
+        encoding: "utf8",
+      });
+      runningHeadlessNew = /--headless=new\b/.test(out);
+    } catch {
+      runningHeadlessNew = false;
+    }
+    const modeMatches =
+      (mode === "new" && runningHeadlessNew) ||
+      (mode === "offscreen" && !runningHeadlessNew) ||
+      (mode === "headed" && !runningHeadlessNew);
+    if (modeMatches) {
+      return {
+        ok: true,
+        cdpUrl: url,
+        started: false,
+        bin: null,
+        headless: wantsIsolated,
+        headlessMode: mode,
+      };
+    }
+    // Wrong chrome flavor on this port — restart into the requested mode.
+    await stopCdpChrome({ port: listenPort });
   }
   if (!startIfMissing) {
     return { ok: false, cdpUrl: url, started: false, bin: null, error: "CDP not available" };
@@ -260,13 +450,19 @@ export async function ensureChromeCdp({
   }
 
   let seeded = null;
-  if (wantsIsolated) {
+  // Prefer the warm headed profile for BOTH Xvfb warm and --headless=new.
+  // Copying cookies into a second profile often loses CF clearance; same
+  // user-data-dir keeps clearance when we relaunch with --headless=new.
+  const headedProfile = cdpProfileDir(false);
+  const useHeadedProfile =
+    (mode === "offscreen" || mode === "new") &&
+    existsSync(join(headedProfile, "Default"));
+  if (mode === "new" && !useHeadedProfile) {
     seeded = seedHeadlessProfileFromHeaded({ force: false });
   }
-  // Offscreen uses the warm headed profile when available — CF clearance sticks.
-  // --headless=new keeps its own profile (seeded) so it never locks the headed one.
-  const useHeadedProfile = mode === "offscreen" && existsSync(join(cdpProfileDir(false), "Default"));
-  const profile = useHeadedProfile ? cdpProfileDir(false) : cdpProfileDir(wantsIsolated);
+  const profile = useHeadedProfile
+    ? headedProfile
+    : cdpProfileDir(mode === "new" || mode === "offscreen");
   for (const name of ["SingletonLock", "SingletonCookie", "SingletonSocket"]) {
     try {
       rmSync(join(profile, name), { force: true });
@@ -293,20 +489,47 @@ export async function ensureChromeCdp({
       "--ozone-override-screen-size=1400,900"
     );
   } else if (mode === "offscreen") {
-    // Real headed binary, no visible window — survives Cloudflare better than
-    // --headless=new on cold chatgpt.com sessions.
-    args.push("--window-position=-2400,-2400", "--start-minimized");
+    // Headed binary for CF warm — MUST run on Xvfb, never the user DISPLAY.
+    args.push("--window-position=0,0");
   }
 
   if (openUrl) args.push(openUrl);
 
+  const spawnEnv = { ...process.env };
+  if (mode === "new") {
+    // True headless — no X11 window; drop DISPLAY so nothing can flash.
+    delete spawnEnv.DISPLAY;
+    delete spawnEnv.WAYLAND_DISPLAY;
+  } else if (mode === "offscreen") {
+    let disp = display;
+    if (!disp) {
+      const xv = await ensureVirtualDisplay();
+      if (!xv.ok) {
+        return {
+          ok: false,
+          cdpUrl: url,
+          started: false,
+          bin,
+          error: `refusing offscreen on user desktop (${xv.error}). Install xvfb or use headless=new.`,
+        };
+      }
+      disp = xv.display;
+    }
+    spawnEnv.DISPLAY = disp;
+    delete spawnEnv.WAYLAND_DISPLAY;
+  } else if (display) {
+    spawnEnv.DISPLAY = display;
+  }
+
   console.error(
-    `browser: starting ${bin} CDP :${listenPort} (${mode}, profile ${profile})`
+    `browser: starting ${bin} CDP :${listenPort} (${mode}${
+      spawnEnv.DISPLAY ? ` DISPLAY=${spawnEnv.DISPLAY}` : " no-DISPLAY"
+    }, profile ${profile})`
   );
   const child = spawn(bin, args, {
     detached: true,
     stdio: "ignore",
-    env: process.env,
+    env: spawnEnv,
   });
   child.unref();
 
