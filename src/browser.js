@@ -317,6 +317,7 @@ export function browserStatus() {
     headless: Boolean(_meta.headless),
     headlessMode: _meta.headlessMode || null,
     cdpUrl: _meta.cdpUrl || null,
+    primaryCookies: _meta.primaryCookies || null,
     extension: _meta.extensionStatus || {
       connected: false,
       lastHello: null,
@@ -474,6 +475,43 @@ export async function browserConnect({
     _context = contexts[0] || (await _browser.newContext());
     const { applyStealthToContext } = await import("./stealth.js");
     await applyStealthToContext(_context);
+    // Pull live session cookies from Firefox/Chrome for known page targets only
+    // (avoid dumping the entire jar when we don't know the site yet).
+    if (process.env.MAILNOTMILK_IMPORT_PRIMARY !== "0") {
+      try {
+        const {
+          extractPrimaryCookies,
+          injectCookiesIntoContext,
+        } = await import("./primary-browser.js");
+        const targets = [
+          process.env.MAILNOTMILK_START_URL,
+          ...(_context.pages() || []).map((p) => p.url()).filter((u) => /^https?:/i.test(u)),
+        ].filter(Boolean);
+        if (targets.length) {
+          const jar = extractPrimaryCookies({ targets });
+          if (jar.ok && jar.cookies?.length) {
+            const inj = await injectCookiesIntoContext(_context, jar.cookies);
+            _meta.primaryCookies = {
+              browser: jar.browser,
+              injected: inj.injected,
+              score: jar.score,
+              profileDir: jar.profileDir,
+            };
+            console.error(
+              `browser: injected ${inj.injected} cookies from primary ${jar.browser} (${jar.profileDir})`
+            );
+          } else {
+            _meta.primaryCookies = {
+              ok: false,
+              error: jar.error,
+              candidates: jar.candidates,
+            };
+          }
+        }
+      } catch (err) {
+        console.error(`browser: primary cookie inject error: ${err.message}`);
+      }
+    }
     const pages = _context.pages();
     _page =
       pages.find((pg) => isKnownSiteUrl(pg.url())) ||
@@ -829,6 +867,37 @@ export async function browserOpenAi({ site = null, url = null } = {}) {
     // Any URL is allowed. Recognise it when we can so the tuned selectors
     // apply; otherwise "custom" falls back to GENERIC, which still works.
     siteKey = detectSiteFromUrl(target) || site || "custom";
+  }
+
+  // Re-inject primary cookies for this target host right before navigation
+  // (Firefox session tokens, etc.) — site-agnostic.
+  if (
+    _context &&
+    _meta.mode !== "extension" &&
+    process.env.MAILNOTMILK_IMPORT_PRIMARY !== "0"
+  ) {
+    try {
+      const {
+        extractPrimaryCookies,
+        injectCookiesIntoContext,
+      } = await import("./primary-browser.js");
+      const jar = extractPrimaryCookies({ targets: [target] });
+      if (jar.ok && jar.cookies?.length) {
+        const inj = await injectCookiesIntoContext(_context, jar.cookies);
+        _meta.primaryCookies = {
+          browser: jar.browser,
+          injected: inj.injected,
+          score: jar.score,
+          profileDir: jar.profileDir,
+          target,
+        };
+        console.error(
+          `browser: refreshed ${inj.injected} primary ${jar.browser} cookies for ${target}`
+        );
+      }
+    } catch (err) {
+      console.error(`browser: cookie refresh error: ${err.message}`);
+    }
   }
 
   if (_meta.mode === "extension") {
