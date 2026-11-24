@@ -492,39 +492,38 @@ export function createServer() {
 
   server.tool(
     "browser_connect",
-    "Connect to browser AI tabs. Prefer mode=extension (normal Chrome + mailnotmilk extension, any site, no --remote-debugging-port). Fallbacks: cdp, launch.",
+    "Connect to browser AI tabs. Auto: live extension → CDP (starts Chrome if needed) → headed Playwright+system Chrome. Prefer CDP over headless — Cloudflare blocks headless Chromium.",
     {
       browser: z.enum(["chrome", "firefox"]).optional(),
-      mode: z.enum(["extension", "launch", "cdp"]).optional(),
+      mode: z.enum(["auto", "extension", "launch", "cdp"]).optional(),
       cdp_url: z.string().optional().describe("For mode=cdp, e.g. http://127.0.0.1:9222"),
       headless: z
         .boolean()
         .optional()
-        .describe("Only for mode=launch. Default true."),
+        .describe("Only for mode=launch. Default false (headed) — headless trips Cloudflare."),
     },
     async ({ browser, mode, cdp_url, headless }) => {
       const b = await import("./browser.js");
-      const ext = await import("./ext-client.js");
-      let resolvedMode = mode || null;
-      if (!resolvedMode) {
-        const st = await ext.extStatus();
-        if (st.connected || st.lastHello) resolvedMode = "extension";
-        else {
-          const { ensureChromeCdp } = await import("./chrome-session.js");
-          const sess = await ensureChromeCdp({
-            cdpUrl: cdp_url || "http://127.0.0.1:9222",
-            startIfMissing: false,
-          });
-          resolvedMode = sess.ok ? "cdp" : "extension";
-        }
-      }
+      const resolved = await b.resolveBrowserConnectMode({
+        mode: mode || "auto",
+        cdpUrl: cdp_url || "http://127.0.0.1:9222",
+      });
       const status = await b.browserConnect({
         browser: browser || "chrome",
-        mode: resolvedMode,
+        mode: resolved.mode,
         cdpUrl: cdp_url || "http://127.0.0.1:9222",
-        headless: headless === undefined ? true : Boolean(headless),
+        // Headless Playwright gets Cloudflare'd on ChatGPT; default headed.
+        headless:
+          headless === undefined
+            ? process.env.MAILNOTMILK_HEADLESS === "1"
+            : Boolean(headless),
       });
-      return textResult({ ok: true, status, mode: resolvedMode });
+      return textResult({
+        ok: true,
+        status,
+        mode: resolved.mode,
+        resolve: resolved,
+      });
     }
   );
 
