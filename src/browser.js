@@ -363,7 +363,7 @@ export async function resolveBrowserConnectMode({
       ? cdpUrl.replace(/:9222\b/, ":9223") || "http://127.0.0.1:9223"
       : cdpUrl,
     startIfMissing: true,
-    openUrl: "https://chatgpt.com/",
+    openUrl: process.env.MAILNOTMILK_START_URL || null,
     headless: preferHeadless,
   });
   if (sess.ok) {
@@ -459,7 +459,7 @@ export async function browserConnect({
     const sess = await ensureChromeCdp({
       cdpUrl,
       startIfMissing: true,
-      openUrl: "https://chatgpt.com/",
+      openUrl: process.env.MAILNOTMILK_START_URL || null,
       headless: headless === false ? false : headless === true ? true : headless,
       forceRestart: false,
     });
@@ -573,7 +573,9 @@ export async function recoverBrowserForCloudflare({
   try {
     const openUrl =
       (site && allSites()[site]?.url) ||
-      "https://chatgpt.com/";
+      _page?.url?.() ||
+      process.env.MAILNOTMILK_START_URL ||
+      "about:blank";
     const recoverUrl = String(cdpUrl || _meta.cdpUrl || "http://127.0.0.1:9223").replace(
       /:9222\b/,
       ":9223"
@@ -806,12 +808,12 @@ export async function waitForCloudflareClear({ timeoutMs = 180_000 } = {}) {
   return { ok: false, waitedMs: Date.now() - start, challenge: true };
 }
 
-export async function browserOpenAi({ site = "deepseek", url = null } = {}) {
+export async function browserOpenAi({ site = null, url = null } = {}) {
   let target = url;
   let siteKey = site;
   if (!target) {
     // A site key with no URL may still be a bare hostname the caller typed.
-    const cfg = allSites()[site];
+    const cfg = site ? allSites()[site] : null;
     if (cfg?.url) {
       target = cfg.url;
       siteKey = site;
@@ -820,7 +822,7 @@ export async function browserOpenAi({ site = "deepseek", url = null } = {}) {
       siteKey = detectSiteFromUrl(target) || "custom";
     } else {
       throw new Error(
-        `Unknown site ${site}. Known: ${listSites().join(", ")} — or pass a URL.`
+        `Pass site= (known: ${listSites().join(", ")}) or url= (any https chat). No default vendor URL.`
       );
     }
   } else {
@@ -1239,6 +1241,91 @@ export async function browserScreenshot({ path = null } = {}) {
   mkdirSync(join(dataDir(), "captures"), { recursive: true });
   await page.screenshot({ path: out, fullPage: false });
   return { path: out, url: page.url() };
+}
+
+/**
+ * Inventory chats / history visible in the current browser AI sidebar.
+ * Site-agnostic — scrapes nav/aside links; works for ChatGPT, Claude, etc.
+ */
+export async function browserListChats({ limit = 50 } = {}) {
+  if (_meta.mode === "extension") {
+    try {
+      const data = await ext.extEval({
+        tabId: _meta.tabId,
+        code: `(() => {
+          const chats = [];
+          const seen = new Set();
+          for (const a of document.querySelectorAll('a[href], [role="listitem"] a, nav a, aside a')) {
+            const href = a.href || a.getAttribute('href') || '';
+            const text = (a.innerText || a.textContent || '').trim().replace(/\\s+/g, ' ');
+            if (!text || text.length < 2) continue;
+            const key = href + '|' + text.slice(0, 80);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            if (/\\/(c|chat|g|project)\\//i.test(href) || /history|conversation/i.test(a.className || '')) {
+              chats.push({ title: text.slice(0, 160), href: href.slice(0, 300) });
+            }
+          }
+          const body = (document.body && document.body.innerText || '').slice(0, 500);
+          return {
+            chats: chats.slice(0, ${Math.min(Math.max(Number(limit) || 50, 1), 100)}),
+            loggedIn: !/sign up for free/i.test(body) && !/^\\s*log in\\b/im.test(body.slice(0, 200)),
+            url: location.href,
+          };
+        })()`,
+      });
+      return { site: _meta.site, ...(data || { chats: [] }) };
+    } catch (err) {
+      return { site: _meta.site, chats: [], error: err.message };
+    }
+  }
+
+  const page = requirePage();
+  const max = Math.min(Math.max(Number(limit) || 50, 1), 100);
+  const data = await page.evaluate((maxN) => {
+    const chats = [];
+    const seen = new Set();
+    const push = (title, href) => {
+      const t = (title || "").trim().replace(/\s+/g, " ");
+      if (!t || t.length < 2) return;
+      const key = `${href}|${t.slice(0, 80)}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      chats.push({ title: t.slice(0, 160), href: (href || "").slice(0, 300) });
+    };
+
+    for (const a of document.querySelectorAll(
+      'a[href*="/c/"], a[href*="/chat/"], a[href*="/g/"], a[href*="conversation"], nav a, aside a, [data-testid*="history"] a'
+    )) {
+      const href = a.href || "";
+      if (/\/(c|chat|g|project)\//i.test(href) || /history|conversation/i.test(a.getAttribute("data-testid") || "")) {
+        push(a.innerText || a.textContent, href);
+      }
+    }
+
+    // Claude / Gemini often use buttons or divs in a history rail
+    for (const el of document.querySelectorAll(
+      '[data-testid="history-item"], [class*="conversation"], [class*="History"] a, [class*="history"] a'
+    )) {
+      const a = el.tagName === "A" ? el : el.querySelector?.("a") || el;
+      push(a.innerText || a.textContent, a.href || "");
+    }
+
+    const body = (document.body?.innerText || "").slice(0, 800);
+    const guest =
+      /sign up for free/i.test(body) ||
+      (/^\s*log in\b/im.test(body.slice(0, 300)) && /sign up/i.test(body));
+    return {
+      chats: chats.slice(0, maxN),
+      count: Math.min(chats.length, maxN),
+      loggedIn: !guest,
+      guest,
+      url: location.href,
+      title: document.title,
+    };
+  }, max);
+
+  return { site: _meta.site, ...data };
 }
 
 export { SITES };

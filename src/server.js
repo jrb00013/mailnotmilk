@@ -535,16 +535,23 @@ export function createServer() {
 
   server.tool(
     "browser_open_ai",
-    "Navigate the connected browser to ChatGPT, DeepSeek, Claude, Gemini, Copilot, or a custom URL.",
+    "Navigate the connected browser to any AI chat URL. Known shortcuts: chatgpt, deepseek, claude, gemini, copilot — or pass url= for any site.",
     {
-      site: z
-        .enum(["chatgpt", "deepseek", "claude", "gemini", "copilot"])
-        .optional(),
-      url: z.string().optional(),
+      site: z.string().optional().describe("Shortcut name or hostname"),
+      url: z.string().optional().describe("Any https URL — preferred when not using a shortcut"),
     },
     async ({ site, url }) => {
       const b = await import("./browser.js");
-      const status = await b.browserOpenAi({ site: site || "deepseek", url: url || null });
+      if (!site && !url) {
+        return textResult({
+          ok: false,
+          error: "Pass site= (shortcut) or url= (any https AI chat). Nothing is assumed.",
+        });
+      }
+      const status = await b.browserOpenAi({
+        site: site || "custom",
+        url: url || null,
+      });
       return textResult({ ok: true, status });
     }
   );
@@ -556,6 +563,19 @@ export function createServer() {
     async ({ limit }) => {
       const b = await import("./browser.js");
       return textResult({ ok: true, ...(await b.browserExtractMessages({ limit: limit || 40 })) });
+    }
+  );
+
+  server.tool(
+    "browser_list_chats",
+    "List chats/history visible in the current browser AI sidebar (any site). Uses primary-browser cookies imported into headless CDP when available.",
+    { limit: z.number().int().min(1).max(100).optional() },
+    async ({ limit }) => {
+      const b = await import("./browser.js");
+      return textResult({
+        ok: true,
+        ...(await b.browserListChats({ limit: limit || 50 })),
+      });
     }
   );
 

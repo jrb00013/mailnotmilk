@@ -42,6 +42,15 @@ export async function waitForExtension({ timeoutMs = 15000 } = {}) {
 }
 
 function siteHomeUrl(site) {
+  // Prefer browser.js site registry when available; env override; else treat
+  // `site` as a hostname/URL. No hard-coded vendor fallback.
+  try {
+    // lazy — avoid circular import at module load
+  } catch {
+    /* ignore */
+  }
+  const env = process.env.MAILNOTMILK_START_URL;
+  if (env) return env;
   const map = {
     chatgpt: "https://chatgpt.com/",
     deepseek: "https://chat.deepseek.com/",
@@ -49,14 +58,25 @@ function siteHomeUrl(site) {
     gemini: "https://gemini.google.com/app",
     copilot: "https://copilot.microsoft.com/",
   };
-  return map[site] || "https://chatgpt.com/";
+  if (map[site]) return map[site];
+  if (site && /\./.test(site)) {
+    return site.includes("://") ? site : `https://${site}`;
+  }
+  throw new Error(
+    `No start URL for site=${site}. Set MAILNOTMILK_START_URL or pass a hostname.`
+  );
 }
 
 /**
  * @param {object} opts
  */
 export async function runStack(opts = {}) {
-  const site = opts.site || process.env.MAILNOTMILK_SITE || "chatgpt";
+  const site = opts.site || process.env.MAILNOTMILK_SITE || null;
+  if (!site && !process.env.MAILNOTMILK_START_URL) {
+    throw new Error(
+      "Set --site / MAILNOTMILK_SITE (shortcut or hostname) or MAILNOTMILK_START_URL. No default vendor."
+    );
+  }
   const peer = opts.peer || process.env.MAILNOTMILK_PEER || "claude";
   const browserName =
     opts.browser || process.env.MAILNOTMILK_BROWSER || "chrome";

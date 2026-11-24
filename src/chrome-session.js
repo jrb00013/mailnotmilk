@@ -283,15 +283,36 @@ export async function ensureVirtualDisplay() {
  */
 export async function ensureTrueHeadlessCdp({
   cdpUrl = "http://127.0.0.1:9223",
-  openUrl = "https://chatgpt.com/",
+  openUrl = null,
   waitCfMs = 90_000,
   checkCfFn = null,
 } = {}) {
+  openUrl = openUrl || process.env.MAILNOTMILK_START_URL || "about:blank";
   const listenPort = parsePort(cdpUrl, 9223);
   const url = `http://127.0.0.1:${listenPort}`;
 
   await stopCdpChrome({ port: listenPort, profile: cdpProfileDir(false) });
   await stopCdpChrome({ port: listenPort, profile: cdpProfileDir(true) });
+
+  // Pull daily-browser cookies into the CDP profile before any Chrome starts.
+  if (process.env.MAILNOTMILK_IMPORT_PRIMARY !== "0") {
+    try {
+      const { seedCdpProfileFromPrimaryBrowser } = await import(
+        "./primary-browser.js"
+      );
+      const dest = cdpProfileDir(false);
+      const prim = seedCdpProfileFromPrimaryBrowser({
+        destProfileDir: dest,
+        force: true,
+        targets: openUrl ? [openUrl] : [],
+      });
+      console.error(
+        `browser: primary→CDP seed ${prim.ok ? prim.reason : prim.error || "fail"} (${prim.primary || "?"})`
+      );
+    } catch (err) {
+      console.error(`browser: primary→CDP seed error: ${err.message}`);
+    }
+  }
 
   const xvfb = await ensureVirtualDisplay();
   if (!xvfb.ok) {
@@ -395,12 +416,13 @@ export async function ensureChromeCdp({
   cdpUrl = null,
   port = null,
   startIfMissing = true,
-  openUrl = "https://chatgpt.com/",
+  openUrl = null,
   headless = false,
   forceRestart = false,
   /** Override DISPLAY. Offscreen never uses the user desktop — Xvfb only. */
   display = null,
 } = {}) {
+  openUrl = openUrl || process.env.MAILNOTMILK_START_URL || null;
   const mode = resolveHeadlessMode(headless);
   const wantsIsolated = mode === "new" || mode === "offscreen";
   // Isolated headless / offscreen use :9223 + chrome-cdp-headless profile.
@@ -450,6 +472,7 @@ export async function ensureChromeCdp({
   }
 
   let seeded = null;
+  let primarySeed = null;
   // Prefer the warm headed profile for BOTH Xvfb warm and --headless=new.
   // Copying cookies into a second profile often loses CF clearance; same
   // user-data-dir keeps clearance when we relaunch with --headless=new.
@@ -463,6 +486,30 @@ export async function ensureChromeCdp({
   const profile = useHeadedProfile
     ? headedProfile
     : cdpProfileDir(mode === "new" || mode === "offscreen");
+
+  // Import login/CF cookies from the user's daily Chrome into this CDP profile
+  // BEFORE launch — dynamic hosts from openUrl (any site).
+  if (process.env.MAILNOTMILK_IMPORT_PRIMARY !== "0") {
+    try {
+      const { seedCdpProfileFromPrimaryBrowser } = await import(
+        "./primary-browser.js"
+      );
+      // Must not overwrite a running Chrome's DB — caller should stop first.
+      primarySeed = seedCdpProfileFromPrimaryBrowser({
+        destProfileDir: profile,
+        force: Boolean(forceRestart) || process.env.MAILNOTMILK_IMPORT_PRIMARY === "force",
+        targets: openUrl ? [openUrl] : [],
+      });
+      if (primarySeed?.ok) {
+        console.error(
+          `browser: imported primary Chrome session → ${profile} (${primarySeed.reason}; hosts=${(primarySeed.hosts || []).join(",") || "all"})`
+        );
+      }
+    } catch (err) {
+      console.error(`browser: primary Chrome import skipped: ${err.message}`);
+    }
+  }
+
   for (const name of ["SingletonLock", "SingletonCookie", "SingletonSocket"]) {
     try {
       rmSync(join(profile, name), { force: true });
@@ -545,6 +592,7 @@ export async function ensureChromeCdp({
         headless: wantsIsolated,
         headlessMode: mode,
         seeded,
+        primarySeed,
         pid: child.pid,
       };
     }
@@ -558,6 +606,7 @@ export async function ensureChromeCdp({
     headless: wantsIsolated,
     headlessMode: mode,
     seeded,
+    primarySeed,
     error: "Chrome started but CDP did not come up",
   };
 }
