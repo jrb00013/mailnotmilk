@@ -318,21 +318,95 @@ export function browserStatus() {
   };
 }
 
+/**
+ * Pick a connect mode that can actually talk to ChatGPT.
+ * Never claim "extension" when the extension is offline — that left agents
+ * stuck with connected:false and no CDP fallback.
+ */
+export async function resolveBrowserConnectMode({
+  mode = "auto",
+  cdpUrl = "http://127.0.0.1:9222",
+  // Test hooks — production callers leave these unset.
+  extStatusFn = null,
+  ensureChromeCdpFn = null,
+} = {}) {
+  if (mode && mode !== "auto") {
+    return { mode, reason: "explicit" };
+  }
+
+  const statusFn = extStatusFn || (() => ext.extStatus());
+  const extStatusNow = await statusFn().catch(() => ({
+    connected: false,
+    lastHello: null,
+  }));
+  if (extStatusNow.connected || extStatusNow.lastHello) {
+    return { mode: "extension", reason: "extension-live", extension: extStatusNow };
+  }
+
+  const ensureFn =
+    ensureChromeCdpFn ||
+    (async (opts) => {
+      const { ensureChromeCdp } = await import("./chrome-session.js");
+      return ensureChromeCdp(opts);
+    });
+  const sess = await ensureFn({
+    cdpUrl,
+    startIfMissing: true,
+    openUrl: "https://chatgpt.com/",
+  });
+  if (sess.ok) {
+    return {
+      mode: "cdp",
+      reason: sess.started ? "cdp-started" : "cdp-existing",
+      cdp: sess,
+    };
+  }
+
+  return {
+    mode: "launch",
+    reason: "playwright-headed-fallback",
+    cdpError: sess.error || null,
+  };
+}
+
 export async function browserConnect({
   browser = "chrome",
   mode = "launch",
   cdpUrl = "http://127.0.0.1:9222",
-  headless = true,
+  headless = false,
   profileDir = null,
 } = {}) {
   await browserDisconnect();
   const name = browser === "firefox" ? "firefox" : "chromium";
 
-  if (mode === "extension") {
+  let resolvedMode = mode;
+  if (mode === "auto") {
+    const picked = await resolveBrowserConnectMode({ mode: "auto", cdpUrl });
+    resolvedMode = picked.mode;
+  }
+
+  if (resolvedMode === "extension") {
     // The extension only ever talks to the hub, so ask the hub whether it is
     // there. Doing this at connect time is what makes `./run.sh` report the
     // truth instead of guessing from a local (always empty) copy of the state.
     const extStatusNow = await ext.extStatus();
+    const live = Boolean(extStatusNow.connected || extStatusNow.lastHello);
+    if (!live) {
+      // Don't strand callers in a fake extension session — fall through to CDP.
+      const picked = await resolveBrowserConnectMode({ mode: "auto", cdpUrl });
+      if (picked.mode === "extension") {
+        throw new Error(
+          "mailnotmilk Chrome extension is not connected. Install/enable it, or use mode=cdp / mode=launch."
+        );
+      }
+      return browserConnect({
+        browser,
+        mode: picked.mode,
+        cdpUrl,
+        headless,
+        profileDir,
+      });
+    }
     _meta = {
       browser: "chrome-extension",
       site: null,
@@ -340,7 +414,7 @@ export async function browserConnect({
       mode: "extension",
       tabId: null,
       extensionStatus: extStatusNow,
-      extensionSeen: Boolean(extStatusNow.connected || extStatusNow.lastHello),
+      extensionSeen: true,
     };
     return browserStatus();
   }
@@ -349,16 +423,28 @@ export async function browserConnect({
   _meta = {
     browser: name,
     site: null,
-    cdp: mode === "cdp",
-    mode,
+    cdp: resolvedMode === "cdp",
+    mode: resolvedMode,
     tabId: null,
     extensionStatus: null,
     extensionSeen: false,
+    headless: Boolean(headless),
   };
 
-  if (mode === "cdp") {
+  if (resolvedMode === "cdp") {
     if (name !== "chromium") {
       throw new Error("CDP attach is Chromium/Chrome only; use mode=launch for Firefox");
+    }
+    const { ensureChromeCdp } = await import("./chrome-session.js");
+    const sess = await ensureChromeCdp({
+      cdpUrl,
+      startIfMissing: true,
+      openUrl: "https://chatgpt.com/",
+    });
+    if (!sess.ok) {
+      throw new Error(
+        `CDP not available (${sess.error || "unknown"}). Start Chrome with --remote-debugging-port=9222 or install Google Chrome.`
+      );
     }
     _browser = await pw.chromium.connectOverCDP(cdpUrl);
     const contexts = _browser.contexts();
@@ -374,8 +460,10 @@ export async function browserConnect({
     const userDataDir =
       profileDir || join(dataDir(), "browser-profiles", name);
     mkdirSync(userDataDir, { recursive: true });
+    // Headless trips Cloudflare on chatgpt.com — default headed.
+    const launchHeadless = Boolean(headless);
     const launchOpts = {
-      headless: Boolean(headless),
+      headless: launchHeadless,
       viewport: { width: 1400, height: 900 },
     };
     if (name === "firefox") {
@@ -391,8 +479,32 @@ export async function browserConnect({
           ...launchOpts,
           channel: "chrome",
         });
-      } catch {
-        _context = await pw.chromium.launchPersistentContext(userDataDir, launchOpts);
+        _meta.browser = "chrome";
+      } catch (err) {
+        if (launchHeadless) {
+          // Last resort: don't stay headless on missing channel — try headed system chrome
+          try {
+            _context = await pw.chromium.launchPersistentContext(userDataDir, {
+              ...launchOpts,
+              headless: false,
+              channel: "chrome",
+            });
+            _meta.browser = "chrome";
+            _meta.headless = false;
+          } catch {
+            throw new Error(
+              `Could not launch system Chrome (${err.message}). Install Google Chrome, or run: npx playwright install chromium`
+            );
+          }
+        } else {
+          try {
+            _context = await pw.chromium.launchPersistentContext(userDataDir, launchOpts);
+          } catch (err2) {
+            throw new Error(
+              `Could not launch browser (${err2.message}). Install Google Chrome or: npx playwright install chromium`
+            );
+          }
+        }
       }
     }
     _browser = _context.browser();
@@ -400,6 +512,48 @@ export async function browserConnect({
   }
 
   return browserStatus();
+}
+
+/**
+ * If Cloudflare is blocking a headless/playwright session, bounce to a real
+ * Chrome CDP window the human (or a one-click) can clear.
+ */
+export async function recoverBrowserForCloudflare({
+  cdpUrl = "http://127.0.0.1:9222",
+  site = null,
+} = {}) {
+  const wasHeadless = Boolean(_meta.headless) || _meta.mode === "launch";
+  console.error(
+    "browser: Cloudflare block — reconnecting via headed Chrome CDP (not headless Playwright)"
+  );
+  await browserDisconnect();
+  const { ensureChromeCdp } = await import("./chrome-session.js");
+  const openUrl =
+    (site && allSites()[site]?.url) ||
+    "https://chatgpt.com/";
+  const sess = await ensureChromeCdp({
+    cdpUrl,
+    startIfMissing: true,
+    openUrl,
+  });
+  if (!sess.ok) {
+    return {
+      ok: false,
+      error: sess.error || "could not start Chrome CDP for Cloudflare recovery",
+      wasHeadless,
+    };
+  }
+  const status = await browserConnect({
+    browser: "chrome",
+    mode: "cdp",
+    cdpUrl,
+    headless: false,
+  });
+  if (site || openUrl) {
+    await browserOpenAi({ site: site || "chatgpt", url: openUrl }).catch(() => {});
+  }
+  const cf = await waitForCloudflareClear({ timeoutMs: 180_000 });
+  return { ok: cf.ok, status, cloudflare: cf, recovered: true, wasHeadless };
 }
 
 export async function browserDisconnect() {
@@ -566,6 +720,18 @@ export async function browserOpenAi({ site = "deepseek", url = null } = {}) {
   await sleep(1500);
   _meta.site = siteKey;
 
+  if (await isCloudflareChallenge()) {
+    if (_meta.headless || _meta.mode === "launch") {
+      const recovery = await recoverBrowserForCloudflare({ site: siteKey });
+      return {
+        ...browserStatus(),
+        title: _page ? await _page.title().catch(() => null) : null,
+        cloudflare: recovery.cloudflare || { ok: recovery.ok },
+        recovered: Boolean(recovery.recovered),
+      };
+    }
+  }
+
   const cf = await waitForCloudflareClear({ timeoutMs: 180_000 });
   if (!cf.ok) {
     console.error(
@@ -609,6 +775,12 @@ export async function browserExtractMessages({ limit = 40 } = {}) {
 
   const page = requirePage();
   if (await isCloudflareChallenge()) {
+    if (_meta.headless || _meta.mode === "launch") {
+      const recovery = await recoverBrowserForCloudflare({ site: _meta.site });
+      if (recovery.ok && !(await isCloudflareChallenge())) {
+        return browserExtractMessages({ limit });
+      }
+    }
     return {
       site: _meta.site,
       url: page.url(),
@@ -618,7 +790,7 @@ export async function browserExtractMessages({ limit = 40 } = {}) {
       lastUser: null,
       blocked: "cloudflare",
       error:
-        "Cloudflare challenge is showing — click Verify you are human in the browser window, then retry.",
+        "Cloudflare challenge is showing — click Verify you are human in the Chrome window (CDP profile), then retry. Avoid headless launch for ChatGPT.",
     };
   }
 
@@ -828,31 +1000,51 @@ export async function waitForAssistantTurn({
   return settler.give_up();
 }
 
+async function ensureNotCloudflareOrRecover(action = "continue") {
+  if (!(await isCloudflareChallenge())) return { recovered: false };
+
+  // Headless / bundled Chromium almost always fails CF — bounce to real Chrome.
+  if (_meta.mode !== "extension" && (_meta.headless || _meta.mode === "launch")) {
+    const recovery = await recoverBrowserForCloudflare({ site: _meta.site });
+    if (recovery.ok && !(await isCloudflareChallenge())) {
+      return { recovered: true, recovery };
+    }
+  }
+
+  const cf = await waitForCloudflareClear({ timeoutMs: 120_000 });
+  if (cf.ok) return { recovered: false, waited: cf };
+
+  throw new Error(
+    `Cloudflare challenge is blocking ${action}. A headed Chrome window should be open — click “Verify you are human”, then retry. Prefer mode=cdp (auto-started) over headless launch.`
+  );
+}
+
 export async function browserSendMessage({ text, submit = true } = {}) {
   if (!text) throw new Error("text required");
   if (_meta.mode === "extension") {
-    if (await isCloudflareChallenge()) {
-      throw new Error(
-        "Cloudflare challenge is showing — click Verify you are human, then retry send."
-      );
-    }
+    await ensureNotCloudflareOrRecover("send");
     const data = await ext.extSend({ text, tabId: _meta.tabId, submit });
     if (data?.tabId) _meta.tabId = data.tabId;
     return { ok: true, site: _meta.site, ...data };
   }
+  await ensureNotCloudflareOrRecover("send");
   const page = requirePage();
-  if (await isCloudflareChallenge()) {
-    throw new Error(
-      "Cloudflare challenge is showing — click Verify you are human, then retry send."
-    );
-  }
   const site = siteConfig(_meta.site);
   const composers = site?.composerSelectors || [
     "textarea",
     'div[contenteditable="true"]',
   ];
-  const composer = await firstSelector(page, composers);
-  if (!composer) throw new Error("Could not find chat composer on page");
+  let composer = await firstSelector(page, composers);
+  if (!composer) {
+    // Guest ChatGPT sometimes paints the composer a beat late
+    await sleep(1500);
+    composer = await firstSelector(page, composers);
+  }
+  if (!composer) {
+    throw new Error(
+      "Could not find chat composer on page (login wall or still loading). If you see Log in, use your normal Chrome profile via the mailnotmilk extension, or log in once in the CDP Chrome window (~/.mailnotmilk/chrome-cdp)."
+    );
+  }
 
   await composer.click({ timeout: 10_000 });
   const handle = await composer.elementHandle();
@@ -874,6 +1066,7 @@ export async function browserSendMessage({ text, submit = true } = {}) {
         await page.keyboard.press("Enter");
       });
     } else {
+      // ChatGPT guest UI often submits on Enter when the send button is the mic/voice control
       await page.keyboard.press("Enter");
     }
     await sleep(1200);
