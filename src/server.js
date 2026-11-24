@@ -492,35 +492,41 @@ export function createServer() {
 
   server.tool(
     "browser_connect",
-    "Connect to browser AI tabs. Auto: live extension → CDP (starts Chrome if needed) → headed Playwright+system Chrome. Prefer CDP over headless — Cloudflare blocks headless Chromium.",
+    "Connect to browser AI. Auto: extension → headless CDP (default offscreen real Chrome; MAILNOTMILK_HEADLESS_MODE=new for --headless=new) → Playwright. MAILNOTMILK_HEADED=1 for a visible window.",
     {
       browser: z.enum(["chrome", "firefox"]).optional(),
       mode: z.enum(["auto", "extension", "launch", "cdp"]).optional(),
-      cdp_url: z.string().optional().describe("For mode=cdp, e.g. http://127.0.0.1:9222"),
+      cdp_url: z
+        .string()
+        .optional()
+        .describe("CDP URL. Headless auto uses :9223; headed uses :9222."),
       headless: z
         .boolean()
         .optional()
-        .describe("Only for mode=launch. Default false (headed) — headless trips Cloudflare."),
+        .describe("Default true (offscreen headed CDP). Set MAILNOTMILK_HEADLESS_MODE=new for Chromium --headless=new."),
     },
     async ({ browser, mode, cdp_url, headless }) => {
       const b = await import("./browser.js");
+      const wantHeadless =
+        headless === undefined
+          ? process.env.MAILNOTMILK_HEADED !== "1"
+          : Boolean(headless);
+      const defaultCdp = wantHeadless
+        ? "http://127.0.0.1:9223"
+        : "http://127.0.0.1:9222";
       const resolved = await b.resolveBrowserConnectMode({
         mode: mode || "auto",
-        cdpUrl: cdp_url || "http://127.0.0.1:9222",
+        cdpUrl: cdp_url || defaultCdp,
       });
       const status = await b.browserConnect({
         browser: browser || "chrome",
-        mode: resolved.mode,
-        cdpUrl: cdp_url || "http://127.0.0.1:9222",
-        // Headless Playwright gets Cloudflare'd on ChatGPT; default headed.
-        headless:
-          headless === undefined
-            ? process.env.MAILNOTMILK_HEADLESS === "1"
-            : Boolean(headless),
+        mode: resolved.mode === "cdp" ? "cdp" : resolved.mode,
+        cdpUrl: resolved.cdp?.cdpUrl || cdp_url || defaultCdp,
+        headless: wantHeadless,
       });
       return textResult({
         ok: true,
-        status,
+        status: { ...status, headless: wantHeadless },
         mode: resolved.mode,
         resolve: resolved,
       });

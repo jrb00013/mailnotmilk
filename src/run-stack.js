@@ -74,8 +74,10 @@ export async function runStack(opts = {}) {
     opts.useSession !== false &&
     process.env.MAILNOTMILK_NO_SESSION !== "1" &&
     browserName !== "firefox";
-  const cdpUrl = opts.cdpUrl || "http://127.0.0.1:9222";
-  const port = Number(new URL(cdpUrl).port || 9222);
+  const cdpUrl =
+    opts.cdpUrl ||
+    (headless ? "http://127.0.0.1:9223" : "http://127.0.0.1:9222");
+  const port = Number(new URL(cdpUrl).port || (headless ? 9223 : 9222));
 
   console.error(
     `mailnotmilk run: site=${site} peer=${peer} browser=${browserName}`
@@ -138,31 +140,32 @@ export async function runStack(opts = {}) {
       port,
       startIfMissing: opts.startChrome !== false,
       openUrl: siteHomeUrl(site),
+      headless,
     });
     if (sess.ok) {
       console.error(
-        `browser: CDP fallback ${cdpUrl}` +
-          (sess.started ? " (started Chrome)" : "")
+        `browser: CDP ${sess.cdpUrl || cdpUrl}` +
+          (sess.started ? " (started)" : "") +
+          (headless ? " [--headless=new]" : " [headed]")
       );
       await browser.browserConnect({
         browser: "chrome",
         mode: "cdp",
-        cdpUrl,
+        cdpUrl: sess.cdpUrl || cdpUrl,
+        headless,
       });
       attached = true;
     }
   }
 
   if (!attached) {
-    const forceHeaded = site === "chatgpt" || process.env.MAILNOTMILK_HEADED === "1";
-    const launchHeadless = forceHeaded ? false : headless;
     console.error(
-      `browser: Playwright fallback (${launchHeadless ? "headless" : "headed"})`
+      `browser: Playwright fallback (${headless ? "headless" : "headed"})`
     );
     await browser.browserConnect({
       browser: browserName === "firefox" ? "firefox" : "chrome",
       mode: "launch",
-      headless: launchHeadless,
+      headless,
     });
   }
 

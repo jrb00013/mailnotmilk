@@ -102,10 +102,11 @@ export async function relayTick({
     if (st.connected || st.lastHello) {
       await browser.browserConnect({ mode: "extension" });
     } else {
+      // True headless by default: Chrome --headless=new over CDP.
       await browser.browserConnect({
         browser: "chrome",
-        mode: "launch",
-        headless: false,
+        mode: "auto",
+        headless: process.env.MAILNOTMILK_HEADED !== "1",
       });
     }
     await browser.browserOpenAi({ site });
